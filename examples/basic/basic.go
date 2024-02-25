@@ -2,6 +2,7 @@ package basic
 
 import (
 	"fmt"
+	"log"
 
 	helpa "github.com/jurooravec/helpa/pkg/component"
 )
@@ -38,8 +39,10 @@ type Context struct {
 var BasicComponent helpa.Component[Spec, Input]
 
 func init() {
+	err := error(nil)
+
 	// Each component must define 3 types: Spec, Input, Context
-	BasicComponent = helpa.CreateComponent[Spec, Input, Context](
+	BasicComponent, err = helpa.CreateComponent[Spec, Input, Context](
 		helpa.Def[Input, Context]{
 			// Configure behavour
 			Options: helpa.Options{
@@ -73,4 +76,8 @@ func init() {
               - {{ Catify "I LOVE CATS" }}
             `,
 		})
+
+	if err != nil {
+		log.Panic(err)
+	}
 }

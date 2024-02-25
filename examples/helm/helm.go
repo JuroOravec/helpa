@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	k8s "k8s.io/api/apps/v1"
+	appsv1 "k8s.io/api/apps/v1"
 
 	helpa "github.com/jurooravec/helpa/pkg/component"
 )
@@ -28,12 +28,12 @@ type Context struct {
 // To make it easy to import this component already configured, we declare
 // the variable and then populated it in the `init` function.
 // See https://tutorialedge.net/golang/the-go-init-function/
-var HelmComponent helpa.Component[k8s.Deployment, Input]
+var HelmComponent helpa.Component[appsv1.Deployment, Input]
 
 func init() {
 	err := error(nil)
 	// Each component must define 3 types: Spec, Input, Context
-	HelmComponent, err = helpa.CreateComponentFromFile[k8s.Deployment, Input, Context](
+	HelmComponent, err = helpa.CreateComponentFromFile[appsv1.Deployment, Input, Context](
 		helpa.Def[Input, Context]{
 			// Configure behavour
 			Options: helpa.Options{
