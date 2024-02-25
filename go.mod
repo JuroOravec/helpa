@@ -1,4 +1,4 @@
-module helpa
+module github.com/jurooravec/helpa
 
 go 1.22.0
 
