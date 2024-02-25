@@ -1,0 +1,6 @@
+my: cool
+spec:
+  - Hello
+  - There
+  - {{ .Number | quote }}
+  - {{ Catify "I LOVE CATS" }}
