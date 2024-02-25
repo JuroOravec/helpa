@@ -3,7 +3,7 @@ module helpa/examples
 go 1.22.0
 
 require (
-	github.com/jurooravec/helpa v0.4.0
+	github.com/jurooravec/helpa v0.5.2
 	k8s.io/api v0.29.2
 	k8s.io/apimachinery v0.29.2
 )

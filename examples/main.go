@@ -3,9 +3,8 @@ package main
 import (
 	"log"
 
-	runtime "k8s.io/apimachinery/pkg/runtime"
 	serializers "github.com/jurooravec/helpa/pkg/serializers"
-	appsv1 "k8s.io/api/apps/v1"
+	runtime "k8s.io/apimachinery/pkg/runtime"
 
 	basic "helpa/examples/basic"
 	fromfile "helpa/examples/fromfile"
@@ -35,13 +34,10 @@ func main() {
 		log.Panicf("Error: %v", err)
 	}
 
-	// Render Kubernetes Deployment definition. The rendered definition
-	// The definition is also automatically validated by being unmarshalled
-	// into the `deployment` variable.
-
-	// We expect to find 2 deployments in the rendered document
-	deployments := []appsv1.Deployment{{}, {}}
-	_, err = helm.HelmComponent.RenderMulti(helm.Input{Number: 2}, &deployments)
+	// Render Kubernetes Deployment definitions from the template. The definitions
+	// are automatically validated as they are unmarshalled and made available as
+	// the `deployments` variable.
+	deployments, _, err := helm.HelmComponent.Render(helm.Input{Number: 2})
 	if err != nil {
 		log.Panicf("Error: %v", err)
 	}
@@ -66,11 +62,12 @@ func main() {
 		}
 	}
 
-	// In the next, we will export the rendered yaml document(s) into a `templates`
-	// directory of a Helm chart.
+	// Next, we will export the rendered yaml document(s) into a `templates`
+	// directory of a Helm chart, so we can then further work with the templates
+	// via Helm.
+	//
+	// Below, we define which resources should be written to what files.
 
-	// Below, we define which resources should be written to what files
-	
 	// We can either use helpers:
 	groups, err := serializers.K8sGroupResourcesBy([]runtime.Object{&deployments[0], &deployments[1]}, "kind")
 	checkError(err)

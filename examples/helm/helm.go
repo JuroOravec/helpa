@@ -28,13 +28,21 @@ type Context struct {
 // To make it easy to import this component already configured, we declare
 // the variable and then populated it in the `init` function.
 // See https://tutorialedge.net/golang/the-go-init-function/
-var HelmComponent helpa.Component[appsv1.Deployment, Input]
+var HelmComponent helpa.ComponentMulti[appsv1.Deployment, Input]
 
 func init() {
 	err := error(nil)
-	// Each component must define 3 types: Spec, Input, Context
-	HelmComponent, err = helpa.CreateComponentFromFile[appsv1.Deployment, Input, Context](
-		helpa.Def[Input, Context]{
+
+	// IMPORTANT: Notice that this component uses `CreateComponentMulti` and `DefMulti`.
+	// This is because the template in `helm.yaml` actually define multiple documents,
+	// separated by `---`.
+	HelmComponent, err = helpa.CreateComponentMulti[appsv1.Deployment, Input, Context](
+		helpa.DefMulti[appsv1.Deployment, Input, Context]{
+			Name: "HelmComponent",
+			// The template uses Helm's renderer, which is based on `text/template`.
+			// Hence, you will find most of Helm's functions like `toYaml`.
+			Template:       `./helm/helm.yaml`,
+			TemplateIsFile: true,
 			// Configure behavour
 			Options: helpa.Options{
 				// PanicOnError: false,
@@ -48,17 +56,24 @@ func init() {
 			//
 			// Other Context's fields are made available as variables, e.g.
 			// `{{ .MyVariable }}`
-			Setup: func(input Input) Context {
-				return Context{
+			Setup: func(input Input) (Context, error) {
+				context := Context{
 					Number: input.Number,
 					Catify: func(s string) string {
 						return fmt.Sprintf("🐈 %s 🐈", s)
 					},
 				}
+				return context, nil
 			},
-			// The template uses Helm's renderer, which is based on `text/template`.
-			// Hence, you will find most of Helm's functions like `toYaml`.
-			Template: `./helm/helm.yaml`,
+			// IMPORTANT: This is a field specific to ComponentMulti. Since each document
+			// in the template can represent a different data structure, we have to specify
+			// the exact data type (via empty instances) for each item.
+			//
+			// Component reports error when the number of documents in the template and the
+			// number of provided instances does not match.
+			GetInstances: func(input Input) ([]appsv1.Deployment, error) {
+				return []appsv1.Deployment{{}, {}}, nil
+			},
 		})
 
 	if err != nil {

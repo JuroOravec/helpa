@@ -42,8 +42,13 @@ func init() {
 	err := error(nil)
 
 	// Each component must define 3 types: Spec, Input, Context
-	FileComponent, err = helpa.CreateComponentFromFile[Spec, Input, Context](
-		helpa.Def[Input, Context]{
+	FileComponent, err = helpa.CreateComponent[Spec, Input, Context](
+		helpa.Def[Spec, Input, Context]{
+			Name: "FileComponent",
+			// The template uses Helm's renderer, which is based on `text/template`.
+			// Hence, you will find most of Helm's functions like `toYaml`.
+			Template:       `./fromfile/fromfile.yaml`,
+			TemplateIsFile: true,
 			// Configure behavour
 			Options: helpa.Options{
 				// PanicOnError: false,
@@ -57,17 +62,15 @@ func init() {
 			//
 			// Other Context's fields are made available as variables, e.g.
 			// `{{ .MyVariable }}`
-			Setup: func(input Input) Context {
-				return Context{
+			Setup: func(input Input) (Context, error) {
+				context := Context{
 					Number: input.Number,
 					Catify: func(s string) string {
 						return fmt.Sprintf("🐈 %s 🐈", s)
 					},
 				}
+				return context, err
 			},
-			// The template uses Helm's renderer, which is based on `text/template`.
-			// Hence, you will find most of Helm's functions like `toYaml`.
-			Template: `./fromfile/fromfile.yaml`,
 		},
 	)
 
