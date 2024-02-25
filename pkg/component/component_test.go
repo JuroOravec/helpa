@@ -17,10 +17,8 @@ type Context struct {
 	Catify func(s string) string
 }
 
-func TestCreateComponentFromFile(t *testing.T) {
-	err := error(nil)
-
-	comp, err := CreateComponentFromFile[k8s.Deployment, Input, Context](
+func setupComponentFromFile[T any]() (Component[T, Input], error) {
+	return CreateComponentFromFile[T, Input, Context](
 		Def[Input, Context]{
 			Setup: func(input Input) Context {
 				return Context{
@@ -30,10 +28,14 @@ func TestCreateComponentFromFile(t *testing.T) {
 					},
 				}
 			},
-			// The template uses Helm's renderer, which is based on `text/template`.
-			// Hence, you will find most of Helm's functions like `toYaml`.
 			Template: `../../examples/helm/helm.yaml`,
-		})
+		},
+	)
+}
+
+func TestCreateComponentFromFile(t *testing.T) {
+	err := error(nil)
+	comp, err := setupComponentFromFile[k8s.Deployment]()
 
 	if err != nil {
 		t.Error(err)
@@ -62,23 +64,26 @@ func TestCreateComponentFromFile(t *testing.T) {
 	}
 }
 
+func TestCreateComponentFromFileFailsOnInvalidUnmarshal(t *testing.T) {
+	err := error(nil)
+	comp, err := setupComponentFromFile[k8s.DaemonSet]()
+
+	if err != nil {
+		t.Error(err)
+	}
+
+	_, _, err = comp.Render(Input{Number: 2})
+	if err == nil {
+		t.Error("Expected error")
+	}
+	if !strings.Contains(err.Error(), "json: unknown field \"replicas\"") {
+		t.Errorf("Expected different error, got %v", err)
+	}
+}
+
 func TestCreateComponentFromFileMulti(t *testing.T) {
 	err := error(nil)
-
-	comp, err := CreateComponentFromFile[k8s.Deployment, Input, Context](
-		Def[Input, Context]{
-			Setup: func(input Input) Context {
-				return Context{
-					Number: input.Number,
-					Catify: func(s string) string {
-						return fmt.Sprintf("🐈 %s 🐈", s)
-					},
-				}
-			},
-			// The template uses Helm's renderer, which is based on `text/template`.
-			// Hence, you will find most of Helm's functions like `toYaml`.
-			Template: `../../examples/helm/helm.yaml`,
-		})
+	comp, err := setupComponentFromFile[k8s.Deployment]()
 
 	if err != nil {
 		t.Error(err)
@@ -112,22 +117,27 @@ func TestCreateComponentFromFileMulti(t *testing.T) {
 	}
 }
 
+func TestCreateComponentFromFileMultiFailsOnInvalidUnmarshal(t *testing.T) {
+	err := error(nil)
+	comp, err := setupComponentFromFile[k8s.DaemonSet]()
+
+	if err != nil {
+		t.Error(err)
+	}
+
+	instances := []k8s.DaemonSet{{}, {}}
+	_, err = comp.RenderMulti(Input{Number: 2}, &instances)
+	if err == nil {
+		t.Error("Expected error")
+	}
+	if !strings.Contains(err.Error(), "json: unknown field \"replicas\"") {
+		t.Errorf("Expected different error, got %v", err)
+	}
+}
+
 func BenchmarkCreateComponentFromFileMulti(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		comp, _ := CreateComponentFromFile[k8s.Deployment, Input, Context](
-			Def[Input, Context]{
-				Setup: func(input Input) Context {
-					return Context{
-						Number: input.Number,
-						Catify: func(s string) string {
-							return fmt.Sprintf("🐈 %s 🐈", s)
-						},
-					}
-				},
-				// The template uses Helm's renderer, which is based on `text/template`.
-				// Hence, you will find most of Helm's functions like `toYaml`.
-				Template: `../../examples/helm/helm.yaml`,
-			})
+		comp, _ := setupComponentFromFile[k8s.Deployment]()
 		instances := []k8s.Deployment{{}, {}}
 		comp.RenderMulti(Input{Number: 2}, &instances)
 	}

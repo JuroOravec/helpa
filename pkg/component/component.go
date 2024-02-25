@@ -81,7 +81,10 @@ func unmarshall(rendered string, container any) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(jsondata, container)
+	
+	dec := json.NewDecoder(bytes.NewReader(jsondata))
+	dec.DisallowUnknownFields()
+	return dec.Decode(container)
 }
 
 // Process the fields in Context.
