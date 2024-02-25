@@ -18,8 +18,8 @@ type Context struct {
 }
 
 func setupComponentFromFile[T any]() (Component[T, Input], error) {
-	return CreateComponentFromFile[T, Input, Context](
-		Def[Input, Context]{
+	return CreateComponent[T, Input, Context](
+		Def[T, Input, Context]{
 			Setup: func(input Input) Context {
 				return Context{
 					Number: input.Number,
@@ -28,7 +28,28 @@ func setupComponentFromFile[T any]() (Component[T, Input], error) {
 					},
 				}
 			},
-			Template: `../../examples/helm/helm.yaml`,
+			Template:       `../../examples/helm/helm.yaml`,
+			TemplateIsFile: true,
+		},
+	)
+}
+
+func setupComponentMultiFromFile[T any](makeInstances func(Input) ([]T, error)) (ComponentMulti[T, Input], error) {
+	return CreateComponentMulti[T, Input, Context](
+		Def[[]T, Input, Context]{
+			Template:       `../../examples/helm/helm.yaml`,
+			TemplateIsFile: true,
+			MakeInstances: func(input Input) ([]T, error) {
+				return makeInstances(input)
+			},
+			Setup: func(input Input) Context {
+				return Context{
+					Number: input.Number,
+					Catify: func(s string) string {
+						return fmt.Sprintf("🐈 %s 🐈", s)
+					},
+				}
+			},
 		},
 	)
 }
@@ -83,14 +104,17 @@ func TestCreateComponentFromFileFailsOnInvalidUnmarshal(t *testing.T) {
 
 func TestCreateComponentFromFileMulti(t *testing.T) {
 	err := error(nil)
-	comp, err := setupComponentFromFile[k8s.Deployment]()
+	comp, err := setupComponentMultiFromFile[k8s.Deployment](
+		func(Input) ([]k8s.Deployment, error) {
+			return []k8s.Deployment{{}, {}}, nil
+		},
+	)
 
 	if err != nil {
 		t.Error(err)
 	}
 
-	instances := []k8s.Deployment{{}, {}}
-	contents, err := comp.RenderMulti(Input{Number: 2}, &instances)
+	instances, contents, err := comp.Render(Input{Number: 2})
 	if err != nil {
 		t.Error(err)
 	}
@@ -119,14 +143,17 @@ func TestCreateComponentFromFileMulti(t *testing.T) {
 
 func TestCreateComponentFromFileMultiFailsOnInvalidUnmarshal(t *testing.T) {
 	err := error(nil)
-	comp, err := setupComponentFromFile[k8s.DaemonSet]()
+	comp, err := setupComponentMultiFromFile[k8s.DaemonSet](
+		func(Input) ([]k8s.DaemonSet, error) {
+			return []k8s.DaemonSet{{}, {}}, nil
+		},
+	)
 
 	if err != nil {
 		t.Error(err)
 	}
 
-	instances := []k8s.DaemonSet{{}, {}}
-	_, err = comp.RenderMulti(Input{Number: 2}, &instances)
+	_, _, err = comp.Render(Input{Number: 2})
 	if err == nil {
 		t.Error("Expected error")
 	}
@@ -137,8 +164,11 @@ func TestCreateComponentFromFileMultiFailsOnInvalidUnmarshal(t *testing.T) {
 
 func BenchmarkCreateComponentFromFileMulti(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		comp, _ := setupComponentFromFile[k8s.Deployment]()
-		instances := []k8s.Deployment{{}, {}}
-		comp.RenderMulti(Input{Number: 2}, &instances)
+		comp, _ := setupComponentMultiFromFile[k8s.Deployment](
+			func(Input) ([]k8s.Deployment, error) {
+				return []k8s.Deployment{{}, {}}, nil
+			},
+		)
+		comp.Render(Input{Number: 2})
 	}
 }
