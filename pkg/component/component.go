@@ -14,7 +14,7 @@ import (
 	templateEngine "k8s.io/helm/pkg/engine"
 	yaml "sigs.k8s.io/yaml"
 
-	preprocess "github.com/jurooravec/helpa/pkg/lib/component/preprocess"
+	preprocess "github.com/jurooravec/helpa/pkg/preprocess"
 )
 
 // Component definition
