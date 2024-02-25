@@ -7,13 +7,13 @@ build:
 	go build
 
 test:
-	go test ./...
+	go test -v ./...
 
 test_bench:
-	go test ./... -bench=.
+	go test -v ./... -bench=.
 
 test_cov:
-	go test ./... -coverprofile=.coverage
+	go test -v ./... -coverprofile=.coverage
 
 test_cov_show:
 	go tool cover -html=.coverage
