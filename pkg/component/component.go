@@ -60,17 +60,15 @@ type DefMulti[TType any, TInput any, TContext any] struct {
 	//
 	// The component reports error if the size of the Array/Slice does not match
 	// the number of instances extracted from the template.
-	Instances []TType
-	Options   Options
+	GetInstances func(TInput) ([]TType, error)
+	Options      Options
 }
 
 func (i DefMulti[TType, TInput, TContext]) Copy() DefMulti[TType, TInput, TContext] {
 	// NOTE: Should be sufficient according to https://stackoverflow.com/questions/51635766
 	copy := i
 	options := i.Options
-	instances := i.Instances
 	copy.Options = options
-	copy.Instances = instances
 	return copy
 }
 
@@ -431,13 +429,22 @@ func CreateComponentMulti[
 			// the interface).
 			//
 			// But if author didn't specify this array,
-			if len(comp.Instances) != len(contentParts) {
-				err = fmt.Errorf("found %v documents in the template, but there is %v instances to unmarshal the data to. These must match. Review the component's `Instances` field and its template", len(contentParts), len(comp.Instances))
+			instances, err = comp.GetInstances(input)
+			if err != nil {
+				if comp.Options.PanicOnError {
+					panic(err)
+				} else {
+					return instances, contentParts, err
+				}
+			}
+
+			if len(instances) != len(contentParts) {
+				err = fmt.Errorf("found %v documents in the template, but there is %v instances to unmarshal the data to. These must match. Review the component's `GetInstances` method and the template", len(contentParts), len(instances))
 				return instances, contentParts, err
 			}
 
 			// Unmarshal the generated structured data to ensure that they are valid.
-			instances, err = doUnmarshalMulti[TType](comp.Name, contentParts, comp.Options, comp.Instances)
+			instances, err = doUnmarshalMulti[TType](comp.Name, contentParts, comp.Options, instances)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)

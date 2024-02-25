@@ -35,12 +35,12 @@ func setupComponentFromFile[T any]() (Component[T, Input], error) {
 	)
 }
 
-func setupComponentMultiFromFile[T any](makeInstances func() []T) (ComponentMulti[T, Input], error) {
+func setupComponentMultiFromFile[T any](makeInstances func(Input) ([]T, error)) (ComponentMulti[T, Input], error) {
 	return CreateComponentMulti[T, Input, Context](
 		DefMulti[T, Input, Context]{
 			Template:       `../../examples/helm/helm.yaml`,
 			TemplateIsFile: true,
-			Instances:      makeInstances(),
+			GetInstances:   makeInstances,
 			Setup: func(input Input) (Context, error) {
 				context := Context{
 					Number: input.Number,
@@ -105,8 +105,8 @@ func TestCreateComponentFromFileFailsOnInvalidUnmarshal(t *testing.T) {
 func TestCreateComponentFromFileMulti(t *testing.T) {
 	err := error(nil)
 	comp, err := setupComponentMultiFromFile[k8s.Deployment](
-		func() []k8s.Deployment {
-			return []k8s.Deployment{{}, {}}
+		func(Input) ([]k8s.Deployment, error) {
+			return []k8s.Deployment{{}, {}}, nil
 		},
 	)
 
@@ -144,8 +144,8 @@ func TestCreateComponentFromFileMulti(t *testing.T) {
 func TestCreateComponentFromFileMultiFailsOnInvalidUnmarshal(t *testing.T) {
 	err := error(nil)
 	comp, err := setupComponentMultiFromFile[k8s.DaemonSet](
-		func() []k8s.DaemonSet {
-			return []k8s.DaemonSet{{}, {}}
+		func(Input) ([]k8s.DaemonSet, error) {
+			return []k8s.DaemonSet{{}, {}}, nil
 		},
 	)
 
@@ -165,8 +165,8 @@ func TestCreateComponentFromFileMultiFailsOnInvalidUnmarshal(t *testing.T) {
 func BenchmarkCreateComponentFromFileMulti(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		comp, _ := setupComponentMultiFromFile[k8s.Deployment](
-			func() []k8s.Deployment {
-				return []k8s.Deployment{{}, {}}
+			func(Input) ([]k8s.Deployment, error) {
+				return []k8s.Deployment{{}, {}}, nil
 			},
 		)
 		comp.Render(Input{Number: 2})
