@@ -20,35 +20,35 @@ type Context struct {
 func setupComponentFromFile[T any]() (Component[T, Input], error) {
 	return CreateComponent[T, Input, Context](
 		Def[T, Input, Context]{
-			Setup: func(input Input) Context {
-				return Context{
+			Template:       `../../examples/helm/helm.yaml`,
+			TemplateIsFile: true,
+			Setup: func(input Input) (Context, error) {
+				context := Context{
 					Number: input.Number,
 					Catify: func(s string) string {
 						return fmt.Sprintf("🐈 %s 🐈", s)
 					},
 				}
+				return context, nil
 			},
-			Template:       `../../examples/helm/helm.yaml`,
-			TemplateIsFile: true,
 		},
 	)
 }
 
-func setupComponentMultiFromFile[T any](makeInstances func(Input) ([]T, error)) (ComponentMulti[T, Input], error) {
+func setupComponentMultiFromFile[T any](makeInstances func() []T) (ComponentMulti[T, Input], error) {
 	return CreateComponentMulti[T, Input, Context](
-		Def[[]T, Input, Context]{
+		DefMulti[T, Input, Context]{
 			Template:       `../../examples/helm/helm.yaml`,
 			TemplateIsFile: true,
-			MakeInstances: func(input Input) ([]T, error) {
-				return makeInstances(input)
-			},
-			Setup: func(input Input) Context {
-				return Context{
+			Instances:      makeInstances(),
+			Setup: func(input Input) (Context, error) {
+				context := Context{
 					Number: input.Number,
 					Catify: func(s string) string {
 						return fmt.Sprintf("🐈 %s 🐈", s)
 					},
 				}
+				return context, nil
 			},
 		},
 	)
@@ -105,8 +105,8 @@ func TestCreateComponentFromFileFailsOnInvalidUnmarshal(t *testing.T) {
 func TestCreateComponentFromFileMulti(t *testing.T) {
 	err := error(nil)
 	comp, err := setupComponentMultiFromFile[k8s.Deployment](
-		func(Input) ([]k8s.Deployment, error) {
-			return []k8s.Deployment{{}, {}}, nil
+		func() []k8s.Deployment {
+			return []k8s.Deployment{{}, {}}
 		},
 	)
 
@@ -133,7 +133,7 @@ func TestCreateComponentFromFileMulti(t *testing.T) {
 	}
 
 	if len(instances) != 2 {
-		t.Errorf("contents != 2, got %v", len(contents))
+		t.Errorf("contents != 2, got %v", len(instances))
 	}
 
 	if instances[0].Spec.Template.Spec.Containers[0].Image != searched || instances[1].Spec.Template.Spec.Containers[0].Image != searched {
@@ -144,8 +144,8 @@ func TestCreateComponentFromFileMulti(t *testing.T) {
 func TestCreateComponentFromFileMultiFailsOnInvalidUnmarshal(t *testing.T) {
 	err := error(nil)
 	comp, err := setupComponentMultiFromFile[k8s.DaemonSet](
-		func(Input) ([]k8s.DaemonSet, error) {
-			return []k8s.DaemonSet{{}, {}}, nil
+		func() []k8s.DaemonSet {
+			return []k8s.DaemonSet{{}, {}}
 		},
 	)
 
@@ -165,8 +165,8 @@ func TestCreateComponentFromFileMultiFailsOnInvalidUnmarshal(t *testing.T) {
 func BenchmarkCreateComponentFromFileMulti(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		comp, _ := setupComponentMultiFromFile[k8s.Deployment](
-			func(Input) ([]k8s.Deployment, error) {
-				return []k8s.Deployment{{}, {}}, nil
+			func() []k8s.Deployment {
+				return []k8s.Deployment{{}, {}}
 			},
 		)
 		comp.Render(Input{Number: 2})

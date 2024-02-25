@@ -17,6 +17,9 @@ import (
 	preprocess "github.com/jurooravec/helpa/pkg/preprocess"
 )
 
+type IDef interface {
+}
+
 // Component definition
 type Def[TType any, TInput any, TContext any] struct {
 	Name     string
@@ -25,9 +28,11 @@ type Def[TType any, TInput any, TContext any] struct {
 	//
 	// If false, `Template` is assumed to be the template itself.
 	TemplateIsFile bool
-	Setup          func(TInput) TContext
-	MakeInstances  func(TInput) (TType, error)
-	Options        Options
+	// Function that transforms input to context. Functions defined on the context
+	// will be made available as template functions. Other context fields will b
+	// available as template variables.
+	Setup   func(TInput) (TContext, error)
+	Options Options
 }
 
 func (i Def[TType, TInput, TContext]) Copy() Def[TType, TInput, TContext] {
@@ -35,6 +40,37 @@ func (i Def[TType, TInput, TContext]) Copy() Def[TType, TInput, TContext] {
 	copy := i
 	options := i.Options
 	copy.Options = options
+	return copy
+}
+
+// Component definition
+type DefMulti[TType any, TInput any, TContext any] struct {
+	Name     string
+	Template string
+	// If true, the `Template` is evaluated as a path to a template file.
+	//
+	// If false, `Template` is assumed to be the template itself.
+	TemplateIsFile bool
+	// Function that transforms input to context. Functions defined on the context
+	// will be made available as template functions. Other context fields will b
+	// available as template variables.
+	Setup func(TInput) (TContext, error)
+	// When we use ComponentMulti, the component does not know what data types to instantiate
+	// for each element in the array/slice. Thus, we need to specify them ourselves here.
+	//
+	// The component reports error if the size of the Array/Slice does not match
+	// the number of instances extracted from the template.
+	Instances []TType
+	Options   Options
+}
+
+func (i DefMulti[TType, TInput, TContext]) Copy() DefMulti[TType, TInput, TContext] {
+	// NOTE: Should be sufficient according to https://stackoverflow.com/questions/51635766
+	copy := i
+	options := i.Options
+	instances := i.Instances
+	copy.Options = options
+	copy.Instances = instances
 	return copy
 }
 
@@ -140,13 +176,12 @@ func parseContext(
 	return funcMap, dataStructInst, nil
 }
 
-func doRender[TType any, TInput any, TContext any](
-	comp Def[TType, TInput, TContext],
-	input TInput,
+func doRender[TContext any](
+	templateName string,
+	templateStr string,
+	context TContext,
 ) (content string, err error) {
-	context := comp.Setup(input)
-
-	funcMap, dataStructInst, err := parseContext(comp.Name, context)
+	funcMap, dataStructInst, err := parseContext(templateName, context)
 	if err != nil {
 		return content, err
 	}
@@ -162,7 +197,7 @@ func doRender[TType any, TInput any, TContext any](
 		engine.FuncMap[key] = val
 	}
 
-	tmpl := template.New(comp.Name)
+	tmpl := template.New(templateName)
 	tmpl.Funcs(engine.FuncMap)
 
 	// This section is based on Helm's code
@@ -174,16 +209,16 @@ func doRender[TType any, TInput any, TContext any](
 		tmpl.Option("missingkey=zero")
 	}
 
-	_, err = tmpl.Parse(comp.Template)
+	_, err = tmpl.Parse(templateStr)
 	if err != nil {
-		return content, fmt.Errorf("parse error in %q: %s", comp.Name, err)
+		return content, fmt.Errorf("parse error in %q: %s", templateName, err)
 	}
 
 	// Do the actual rendering
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, dataStructInst)
 	if err != nil {
-		err = fmt.Errorf("render error in %q: %s", comp.Name, err)
+		err = fmt.Errorf("render error in %q: %s", templateName, err)
 		return content, err
 	}
 
@@ -192,82 +227,77 @@ func doRender[TType any, TInput any, TContext any](
 	return content, nil
 }
 
-func doUnmarshalOne[TType any, TInput any, TContext any](
-	comp Def[TType, TInput, TContext],
+func doUnmarshalOne[TType any](
+	templateName string,
 	content string,
+	options Options,
 ) (out TType, err error) {
-	err = comp.Options.Unmarshal(content, &out)
+	err = options.Unmarshal(content, &out)
 	if err != nil {
-		err = fmt.Errorf("render error in %q: %s", comp.Name, err)
+		err = fmt.Errorf("render error in %q: %s", templateName, err)
 		return out, err
 	}
 
 	return out, nil
 }
 
-func doUnmarshalMulti[TType any, TInput any, TContext any](
-	comp Def[[]TType, TInput, TContext],
-	content string,
-	out []TType,
-) (contentParts []string, err error) {
-	// In Helm files, it's common to use `---` to define multiple independent
-	// resources. To support that, we try to split the rendered file into an array
-	// of docs.
-	//
-	// NOTE: In such case, the `TType` instance that the user provided should
-	// itself be an Array/Slice.
-	contentParts = strings.Split(content, comp.Options.MultiDocSeparator)
-
-	// log.Printf("OUT: %v", outUnpacked)
-
+func doUnmarshalMulti[TType any](
+	templateName string,
+	contentParts []string,
+	options Options,
+	instances []TType,
+) (out []TType, err error) {
 	// Lastly, unmarshal the generated structured data to ensure
 	// that they are valid.
 	for index, doc := range contentParts {
-		err = comp.Options.Unmarshal(doc, &out[index])
-
+		// NOTE: We MUST make a copy of the instance, because the `instances` serve as blueprint.
+		// So we must be careful here not to accidentally change state of the `instances` array.
+		instance := instances[index]
+		err = options.Unmarshal(doc, &instance)
 		if err != nil {
-			err = fmt.Errorf("render error in %q: %s", comp.Name, err)
-			return contentParts, err
+			err = fmt.Errorf("render error in %q: %s", templateName, err)
+			return out, err
 		}
+		out = append(out, instance)
 	}
 
-	return contentParts, nil
+	return out, nil
 }
 
-func doPrepareComponentInput[TType any, TInput any, TContext any](
-	comp Def[TType, TInput, TContext],
-) (Def[TType, TInput, TContext], error) {
-	comp = comp.Copy()
-
+func doPrepareComponentInput(
+	templateName string,
+	templateStr string,
+	templateIsFile bool,
+	options *Options,
+) (string, error) {
 	// Set defaults
-	if comp.Options.PreprocessTemplate == nil {
-		comp.Options.PreprocessTemplate = preprocessTemplate
+	if options.PreprocessTemplate == nil {
+		options.PreprocessTemplate = preprocessTemplate
 	}
-	if comp.Options.Unmarshal == nil {
-		comp.Options.Unmarshal = unmarshall
+	if options.Unmarshal == nil {
+		options.Unmarshal = unmarshall
 	}
-	if comp.Options.MultiDocSeparator == "" {
-		comp.Options.MultiDocSeparator = "---"
+	if options.MultiDocSeparator == "" {
+		options.MultiDocSeparator = "---"
 	}
 
 	// Load the template from file
-	if comp.TemplateIsFile {
-		dat, err := os.ReadFile(comp.Template)
+	if templateIsFile {
+		dat, err := os.ReadFile(templateStr)
 		if err != nil {
-			err = fmt.Errorf("error reading file: %s in %q", err, comp.Name)
-			return comp, err
+			err = fmt.Errorf("error reading file: %s in %q", err, templateName)
+			return templateStr, err
 		}
-		comp.Template = string(dat)
+		templateStr = string(dat)
 	}
 
 	// Normalize the template
-	tmpl, err := comp.Options.PreprocessTemplate(comp.Template)
+	templateStr, err := options.PreprocessTemplate(templateStr)
 	if err != nil {
-		return Def[TType, TInput, TContext]{}, err
+		return templateStr, err
 	}
-	comp.Template = tmpl
 
-	return comp, nil
+	return templateStr, nil
 }
 
 func CreateComponent[
@@ -275,7 +305,8 @@ func CreateComponent[
 	TInput any,
 	TContext any,
 ](comp Def[TType, TInput, TContext]) (Component[TType, TInput], error) {
-	comp, err := doPrepareComponentInput[TType, TInput, TContext](comp)
+	comp = comp.Copy()
+	tmpl, err := doPrepareComponentInput(comp.Name, comp.Template, comp.TemplateIsFile, &comp.Options)
 	if err != nil {
 		if comp.Options.PanicOnError {
 			panic(err)
@@ -283,6 +314,7 @@ func CreateComponent[
 			return Component[TType, TInput]{}, err
 		}
 	}
+	comp.Template = tmpl
 
 	// Resulting function is wrapped in a Struct so it's easier to type,
 	// so we can use:
@@ -300,7 +332,16 @@ func CreateComponent[
 				}
 			}()
 
-			content, err = doRender[TType, TInput, TContext](comp, input)
+			context, err := comp.Setup(input)
+			if err != nil {
+				if comp.Options.PanicOnError {
+					panic(err)
+				} else {
+					return instance, content, err
+				}
+			}
+
+			content, err = doRender[TContext](comp.Name, comp.Template, context)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
@@ -310,7 +351,7 @@ func CreateComponent[
 			}
 
 			// Unmarshal the generated structured data to ensure that they are valid.
-			instance, err = doUnmarshalOne[TType, TInput, TContext](comp, content)
+			instance, err = doUnmarshalOne[TType](comp.Name, content, comp.Options)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
@@ -330,8 +371,9 @@ func CreateComponentMulti[
 	TType any,
 	TInput any,
 	TContext any,
-](comp Def[[]TType, TInput, TContext]) (ComponentMulti[TType, TInput], error) {
-	comp, err := doPrepareComponentInput[[]TType, TInput, TContext](comp)
+](comp DefMulti[TType, TInput, TContext]) (ComponentMulti[TType, TInput], error) {
+	comp = comp.Copy()
+	tmpl, err := doPrepareComponentInput(comp.Name, comp.Template, comp.TemplateIsFile, &comp.Options)
 	if err != nil {
 		if comp.Options.PanicOnError {
 			panic(err)
@@ -339,15 +381,16 @@ func CreateComponentMulti[
 			return ComponentMulti[TType, TInput]{}, err
 		}
 	}
+	comp.Template = tmpl
 
 	// Resulting function is wrapped in a Struct so it's easier to type,
 	// so we can use:
 	// `ComponentMulti[TType, TInput].Render`
 	//
 	// Instead of manually typing:
-	// `func(input TInput) (instance TType, []contents string, err error)`
+	// `func(input TInput) (instance TType, []contentParts string, err error)`
 	component := ComponentMulti[TType, TInput]{
-		Render: func(input TInput) (instances []TType, contents []string, err error) {
+		Render: func(input TInput) (instances []TType, contentParts []string, err error) {
 			defer func() {
 				if !comp.Options.PanicOnError {
 					if r := recover(); r != nil {
@@ -356,37 +399,54 @@ func CreateComponentMulti[
 				}
 			}()
 
-			instances, err = comp.MakeInstances(input)
+			context, err := comp.Setup(input)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
 				} else {
-					return instances, contents, err
+					return instances, contentParts, err
 				}
 			}
 
-			content, err := doRender[[]TType, TInput, TContext](comp, input)
-
+			content, err := doRender[TContext](comp.Name, comp.Template, context)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
 				} else {
-					return instances, contents, err
+					return instances, contentParts, err
 				}
+			}
+
+			// In Helm files, it's common to use `---` to define multiple independent
+			// resources. To support that, we try to split the rendered file into an array
+			// of docs.
+			//
+			// NOTE: In such case, the `TType` instance that the user provided should
+			// itself be an Array/Slice.
+			contentParts = strings.Split(content, comp.Options.MultiDocSeparator)
+
+			// Allow the author of the component to specify exact instances that should be populated
+			// with the extracted data. This way, they can specify an interface for the instances' type,
+			// and then create homogenous array of specific length (assuming all elements implement
+			// the interface).
+			//
+			// But if author didn't specify this array,
+			if len(comp.Instances) != len(contentParts) {
+				err = fmt.Errorf("found %v documents in the template, but there is %v instances to unmarshal the data to. These must match. Review the component's `Instances` field and its template", len(contentParts), len(comp.Instances))
+				return instances, contentParts, err
 			}
 
 			// Unmarshal the generated structured data to ensure that they are valid.
-			contents, err = doUnmarshalMulti[TType, TInput, TContext](comp, content, instances)
-
+			instances, err = doUnmarshalMulti[TType](comp.Name, contentParts, comp.Options, comp.Instances)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
 				} else {
-					return instances, contents, err
+					return instances, contentParts, err
 				}
 			}
 
-			return instances, contents, nil
+			return instances, contentParts, nil
 		},
 	}
 
