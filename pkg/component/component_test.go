@@ -40,8 +40,39 @@ func setupComponentFromFile[T any](
 }
 
 func setupComponentMultiFromFile[T any](
-	makeInstances func(Input) ([]T, error),
+	makeInstances func(Input, Context) ([]T, error),
 	render func(Input, Context, []string) ([]T, error),
+) (ComponentMulti[T, Input], error) {
+	return CreateComponentMulti[T, Input, Context](
+		DefMulti[T, Input, Context]{
+			Template:       `../../examples/helm/helm.yaml`,
+			TemplateIsFile: true,
+			GetInstances:   makeInstances,
+			Render:         render,
+		},
+	)
+}
+
+func setupComponentFromFileFrontload[T any](
+	setup func(input Input) (Context, error),
+	frontloadInput Input,
+) (Component[T, Input], error) {
+	return CreateComponent[T, Input, Context](
+		Def[T, Input, Context]{
+			Template:       `../../examples/helm/helm.yaml`,
+			TemplateIsFile: true,
+			Options: Options[Input]{
+				FrontloadEnabled: true,
+				FrontloadInput:   frontloadInput,
+			},
+			Setup: setup,
+		},
+	)
+}
+
+func setupComponentMultiFromFileFrontload[T any](
+	makeInstances func(Input, Context) ([]T, error),
+	frontloadInput Input,
 ) (ComponentMulti[T, Input], error) {
 	return CreateComponentMulti[T, Input, Context](
 		DefMulti[T, Input, Context]{
@@ -57,7 +88,10 @@ func setupComponentMultiFromFile[T any](
 				}
 				return context, nil
 			},
-			Render: render,
+			Options: Options[Input]{
+				FrontloadEnabled: true,
+				FrontloadInput:   frontloadInput,
+			},
 		},
 	)
 }
@@ -110,10 +144,33 @@ func TestCreateComponentFromFileFailsOnInvalidUnmarshal(t *testing.T) {
 	}
 }
 
+func TestComponentFrontloadFailsAtInit(t *testing.T) {
+	err := error(nil)
+	inputAtInit := Input{}
+	_, err = setupComponentFromFileFrontload[k8s.DaemonSet](
+		func(input Input) (Context, error) {
+			inputAtInit = input
+			return Context{}, nil
+		},
+		Input{Number: 3},
+	)
+
+	if err == nil {
+		t.Error("Expected error")
+	}
+	if !strings.Contains(err.Error(), "json: unknown field \"replicas\"") {
+		t.Errorf("Expected different error, got %v", err)
+	}
+
+	if inputAtInit.Number != 3 {
+		t.Errorf("Expected frontload input Number == 3, got %v", inputAtInit.Number)
+	}
+}
+
 func TestCreateComponentFromFileMulti(t *testing.T) {
 	err := error(nil)
 	comp, err := setupComponentMultiFromFile[k8s.Deployment](
-		func(Input) ([]k8s.Deployment, error) {
+		func(Input, Context) ([]k8s.Deployment, error) {
 			return []k8s.Deployment{{}, {}}, nil
 		},
 		nil,
@@ -153,7 +210,7 @@ func TestCreateComponentFromFileMulti(t *testing.T) {
 func TestCreateComponentFromFileMultiFailsOnInvalidUnmarshal(t *testing.T) {
 	err := error(nil)
 	comp, err := setupComponentMultiFromFile[k8s.DaemonSet](
-		func(Input) ([]k8s.DaemonSet, error) {
+		func(Input, Context) ([]k8s.DaemonSet, error) {
 			return []k8s.DaemonSet{{}, {}}, nil
 		},
 		nil,
@@ -169,6 +226,29 @@ func TestCreateComponentFromFileMultiFailsOnInvalidUnmarshal(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "json: unknown field \"replicas\"") {
 		t.Errorf("Expected different error, got %v", err)
+	}
+}
+
+func TestComponentMultiFrontloadFailsAtInit(t *testing.T) {
+	err := error(nil)
+	inputAtInit := Input{}
+	_, err = setupComponentMultiFromFileFrontload[k8s.DaemonSet](
+		func(input Input, context Context) ([]k8s.DaemonSet, error) {
+			inputAtInit = input
+			return []k8s.DaemonSet{{}, {}}, nil
+		},
+		Input{Number: 3},
+	)
+
+	if err == nil {
+		t.Error("Expected error")
+	}
+	if !strings.Contains(err.Error(), "json: unknown field \"replicas\"") {
+		t.Errorf("Expected different error, got %v", err)
+	}
+
+	if inputAtInit.Number != 3 {
+		t.Errorf("Expected frontload input Number == 3, got %v", inputAtInit.Number)
 	}
 }
 
@@ -236,7 +316,7 @@ func TestComponentMultiRender(t *testing.T) {
 	didCallInstances := false
 	didCallRender := false
 	comp, err := setupComponentMultiFromFile[k8s.Deployment](
-		func(Input) ([]k8s.Deployment, error) {
+		func(Input, Context) ([]k8s.Deployment, error) {
 			didCallInstances = true
 			return []k8s.Deployment{{}, {}}, nil
 		},
@@ -308,7 +388,7 @@ func TestComponentMultiRender(t *testing.T) {
 func BenchmarkCreateComponentFromFileMulti(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		comp, _ := setupComponentMultiFromFile[k8s.Deployment](
-			func(Input) ([]k8s.Deployment, error) {
+			func(Input, Context) ([]k8s.Deployment, error) {
 				return []k8s.Deployment{{}, {}}, nil
 			},
 			nil,

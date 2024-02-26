@@ -17,9 +17,6 @@ import (
 	preprocess "github.com/jurooravec/helpa/pkg/preprocess"
 )
 
-type IDef interface {
-}
-
 // Component definition
 type Def[TType any, TInput any, TContext any] struct {
 	Name     string
@@ -33,7 +30,7 @@ type Def[TType any, TInput any, TContext any] struct {
 	// available as template variables.
 	Setup   func(TInput) (TContext, error)
 	Render  func(input TInput, context TContext, content string) (TType, error)
-	Options Options
+	Options Options[TInput]
 }
 
 func (i Def[TType, TInput, TContext]) Copy() Def[TType, TInput, TContext] {
@@ -61,9 +58,9 @@ type DefMulti[TType any, TInput any, TContext any] struct {
 	//
 	// The component reports error if the size of the Array/Slice does not match
 	// the number of instances extracted from the template.
-	GetInstances func(TInput) ([]TType, error)
+	GetInstances func(input TInput, context TContext) ([]TType, error)
 	Render       func(input TInput, context TContext, contentParts []string) ([]TType, error)
-	Options      Options
+	Options      Options[TInput]
 }
 
 func (i DefMulti[TType, TInput, TContext]) Copy() DefMulti[TType, TInput, TContext] {
@@ -75,7 +72,7 @@ func (i DefMulti[TType, TInput, TContext]) Copy() DefMulti[TType, TInput, TConte
 }
 
 // Component options
-type Options struct {
+type Options[TInput any] struct {
 	// By default, any errors are returned as result tuple. If you want to panic
 	// on errors and don't want to handle errors every time, set this to `true`.
 	PanicOnError bool
@@ -97,6 +94,16 @@ type Options struct {
 	//
 	// See https://yaml.org/spec/1.2.2/#22-structures
 	MultiDocSeparator string
+	// Check integrity of textual templates at component creation.
+	//
+	// If frontloading is enabled, we will make a dummy call to the `component.Render`
+	// method at component creation, to ensure that everything works correctly,
+	// especially the unmarshalling of a textual template.
+	//
+	// Frontloading should be OFF in production, and ON for development and testing.
+	FrontloadEnabled bool
+	// Configure the input for the frontloading call.
+	FrontloadInput TInput
 }
 
 type Component[TType any, TInput any] struct {
@@ -227,10 +234,10 @@ func doRender[TContext any](
 	return content, nil
 }
 
-func doUnmarshalOne[TType any](
+func doUnmarshalOne[TType any, TInput any](
 	templateName string,
 	content string,
-	options Options,
+	options Options[TInput],
 ) (out TType, err error) {
 	err = options.Unmarshal(content, &out)
 	if err != nil {
@@ -241,10 +248,10 @@ func doUnmarshalOne[TType any](
 	return out, nil
 }
 
-func doUnmarshalMulti[TType any](
+func doUnmarshalMulti[TType any, TInput any](
 	templateName string,
 	contentParts []string,
-	options Options,
+	options Options[TInput],
 	instances []TType,
 ) (out []TType, err error) {
 	// Lastly, unmarshal the generated structured data to ensure
@@ -264,11 +271,11 @@ func doUnmarshalMulti[TType any](
 	return out, nil
 }
 
-func doPrepareComponentInput(
+func doPrepareComponentInput[TInput any](
 	templateName string,
 	templateStr string,
 	templateIsFile bool,
-	options *Options,
+	options *Options[TInput],
 ) (string, error) {
 	// Set defaults
 	if options.PreprocessTemplate == nil {
@@ -306,6 +313,11 @@ func CreateComponent[
 	TContext any,
 ](comp Def[TType, TInput, TContext]) (Component[TType, TInput], error) {
 	comp = comp.Copy()
+
+	if comp.Setup == nil {
+		comp.Setup = func(t TInput) (context TContext, err error) { return context, err }
+	}
+
 	tmpl, err := doPrepareComponentInput(comp.Name, comp.Template, comp.TemplateIsFile, &comp.Options)
 	if err != nil {
 		if comp.Options.PanicOnError {
@@ -368,6 +380,20 @@ func CreateComponent[
 		},
 	}
 
+	// If frontloading is enabled, we will make a dummy call to the `component.Render`
+	// method at component creation, to ensure that everything works correctly,
+	// especially the unmarshalling of a textual template.
+	if comp.Options.FrontloadEnabled {
+		_, _, err = component.Render(comp.Options.FrontloadInput)
+	}
+	if err != nil {
+		if comp.Options.PanicOnError {
+			panic(err)
+		} else {
+			return component, err
+		}
+	}
+
 	return component, nil
 }
 
@@ -377,6 +403,11 @@ func CreateComponentMulti[
 	TContext any,
 ](comp DefMulti[TType, TInput, TContext]) (ComponentMulti[TType, TInput], error) {
 	comp = comp.Copy()
+
+	if comp.Setup == nil {
+		comp.Setup = func(t TInput) (context TContext, err error) { return context, err }
+	}
+
 	tmpl, err := doPrepareComponentInput(comp.Name, comp.Template, comp.TemplateIsFile, &comp.Options)
 	if err != nil {
 		if comp.Options.PanicOnError {
@@ -412,7 +443,7 @@ func CreateComponentMulti[
 				}
 			}
 
-			content, err := doRender[TContext](comp.Name, comp.Template, context)
+			content, err := doRender(comp.Name, comp.Template, context)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
@@ -435,7 +466,7 @@ func CreateComponentMulti[
 			// the interface).
 			//
 			// But if author didn't specify this array,
-			instances, err = comp.GetInstances(input)
+			instances, err = comp.GetInstances(input, context)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
@@ -453,7 +484,7 @@ func CreateComponentMulti[
 				instances, err = comp.Render(input, context, contentParts)
 			} else {
 				// Unmarshal the generated structured data to ensure that they are valid.
-				instances, err = doUnmarshalMulti[TType](comp.Name, contentParts, comp.Options, instances)
+				instances, err = doUnmarshalMulti(comp.Name, contentParts, comp.Options, instances)
 			}
 			if err != nil {
 				if comp.Options.PanicOnError {
@@ -465,6 +496,20 @@ func CreateComponentMulti[
 
 			return instances, contentParts, nil
 		},
+	}
+
+	// If frontloading is enabled, we will make a dummy call to the `component.Render`
+	// method at component creation, to ensure that everything works correctly,
+	// especially the unmarshalling of a textual template.
+	if comp.Options.FrontloadEnabled {
+		_, _, err = component.Render(comp.Options.FrontloadInput)
+	}
+	if err != nil {
+		if comp.Options.PanicOnError {
+			panic(err)
+		} else {
+			return component, err
+		}
 	}
 
 	return component, nil
