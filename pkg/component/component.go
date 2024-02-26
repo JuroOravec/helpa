@@ -32,6 +32,7 @@ type Def[TType any, TInput any, TContext any] struct {
 	// will be made available as template functions. Other context fields will b
 	// available as template variables.
 	Setup   func(TInput) (TContext, error)
+	Render  func(input TInput, context TContext, content string) (TType, error)
 	Options Options
 }
 
@@ -61,6 +62,7 @@ type DefMulti[TType any, TInput any, TContext any] struct {
 	// The component reports error if the size of the Array/Slice does not match
 	// the number of instances extracted from the template.
 	GetInstances func(TInput) ([]TType, error)
+	Render       func(input TInput, context TContext, contentParts []string) ([]TType, error)
 	Options      Options
 }
 
@@ -108,7 +110,7 @@ func isFunc(v any) bool {
 	return reflect.TypeOf(v).Kind() == reflect.Func
 }
 
-func preprocessTemplate(tmpl string) (string, error) {
+func defaultPreprocessor(tmpl string) (string, error) {
 	tmpl, err := preprocess.TrimTemplate(tmpl)
 	if err != nil {
 		return tmpl, err
@@ -117,7 +119,7 @@ func preprocessTemplate(tmpl string) (string, error) {
 	return tmpl, nil
 }
 
-func unmarshall(rendered string, container any) error {
+func defaultUnmarshaller(rendered string, container any) error {
 	jsondata, err := yaml.YAMLToJSON([]byte(rendered))
 	if err != nil {
 		return err
@@ -270,10 +272,10 @@ func doPrepareComponentInput(
 ) (string, error) {
 	// Set defaults
 	if options.PreprocessTemplate == nil {
-		options.PreprocessTemplate = preprocessTemplate
+		options.PreprocessTemplate = defaultPreprocessor
 	}
 	if options.Unmarshal == nil {
-		options.Unmarshal = unmarshall
+		options.Unmarshal = defaultUnmarshaller
 	}
 	if options.MultiDocSeparator == "" {
 		options.MultiDocSeparator = "---"
@@ -348,8 +350,12 @@ func CreateComponent[
 				}
 			}
 
-			// Unmarshal the generated structured data to ensure that they are valid.
-			instance, err = doUnmarshalOne[TType](comp.Name, content, comp.Options)
+			if comp.Render != nil {
+				instance, err = comp.Render(input, context, content)
+			} else {
+				// Unmarshal the generated structured data to ensure that they are valid.
+				instance, err = doUnmarshalOne[TType](comp.Name, content, comp.Options)
+			}
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
@@ -443,8 +449,12 @@ func CreateComponentMulti[
 				return instances, contentParts, err
 			}
 
-			// Unmarshal the generated structured data to ensure that they are valid.
-			instances, err = doUnmarshalMulti[TType](comp.Name, contentParts, comp.Options, instances)
+			if comp.Render != nil {
+				instances, err = comp.Render(input, context, contentParts)
+			} else {
+				// Unmarshal the generated structured data to ensure that they are valid.
+				instances, err = doUnmarshalMulti[TType](comp.Name, contentParts, comp.Options, instances)
+			}
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
