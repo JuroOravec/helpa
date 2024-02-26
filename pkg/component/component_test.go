@@ -14,8 +14,28 @@ type Input struct {
 }
 
 type Context struct {
-	Number int
+	Number string
 	Catify func(s string) string
+}
+
+func setupComponentInline[T any](
+	render func(Input, Context, string) (T, error),
+) (Component[T, Input], error) {
+	return CreateComponent[T, Input, Context](
+		Def[T, Input, Context]{
+			Setup: func(input Input) (Context, error) {
+				context := Context{
+					Number: fmt.Sprint(input.Number),
+					Catify: func(s string) string {
+						return fmt.Sprintf("🐈 %s 🐈", s)
+					},
+				}
+				return context, nil
+			},
+			Template: `Hello: {{ Catify .Helpa.Number }}`,
+			Render: render,
+		},
+	)
 }
 
 func setupComponentFromFile[T any](
@@ -27,7 +47,7 @@ func setupComponentFromFile[T any](
 			TemplateIsFile: true,
 			Setup: func(input Input) (Context, error) {
 				context := Context{
-					Number: input.Number,
+					Number: fmt.Sprint(input.Number),
 					Catify: func(s string) string {
 						return fmt.Sprintf("🐈 %s 🐈", s)
 					},
@@ -81,7 +101,7 @@ func setupComponentMultiFromFileFrontload[T any](
 			GetInstances:   makeInstances,
 			Setup: func(input Input) (Context, error) {
 				context := Context{
-					Number: input.Number,
+					Number: fmt.Sprint(input.Number),
 					Catify: func(s string) string {
 						return fmt.Sprintf("🐈 %s 🐈", s)
 					},
@@ -141,6 +161,24 @@ func TestCreateComponentFromFileFailsOnInvalidUnmarshal(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "json: unknown field \"replicas\"") {
 		t.Errorf("Expected different error, got %v", err)
+	}
+}
+
+func TestCreateComponentInline(t *testing.T) {
+	err := error(nil)
+	comp, err := setupComponentInline[any](nil)
+
+	if err != nil {
+		t.Error(err)
+	}
+
+	_, content, err := comp.Render(Input{Number: 2})
+	if err != nil {
+		t.Error(err)
+	}
+
+	if content != "Hello: 🐈 2 🐈" {
+		t.Errorf("Content differs from expeced, got %s", content)
 	}
 }
 

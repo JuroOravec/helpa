@@ -193,6 +193,12 @@ func doRender[TContext any](
 		return content, err
 	}
 
+	// "Namespace" all the variables from user's component under the "Helpa" key
+	// so they are accessed as:
+	// {{ .Helpa.MyValue }}
+	data := map[string]any{}
+	data["Helpa"] = dataStructInst
+
 	// Using the Engine struct from Helm package ensures that we use all the same
 	// functions as they do (with a few exceptions).
 	engine := templateEngine.New()
@@ -223,7 +229,7 @@ func doRender[TContext any](
 
 	// Do the actual rendering
 	var buf bytes.Buffer
-	err = tmpl.Execute(&buf, dataStructInst)
+	err = tmpl.Execute(&buf, data)
 	if err != nil {
 		err = fmt.Errorf("render error in %q: %s", templateName, err)
 		return content, err
