@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	template "text/template"
 
@@ -277,12 +278,44 @@ func doUnmarshalMulti[TType any, TInput any](
 	return out, nil
 }
 
+// Adds a way for users to access helm variables via go templates `{{ }}` without
+// having those commands lost when we "pre-render" templates.
+//
+// To achieve that, user has to use `{{! ... }}` instead of plain `{{ ... }}`.
+//
+// Behind the scences, we replace the `{{! }}` with identifiers that we can then
+// match back after the template has been matched.
+func escapeHelmTemplateActions(tmpl string) (string, map[string]string){
+	replacementMap := map[string]string{}
+
+	re := regexp.MustCompile(`{{![^}]*}}`)
+	tmpl = re.ReplaceAllStringFunc(tmpl, func(match string) string {
+		// E.g. `__helpa__slot_1`
+		key := fmt.Sprintf("__helpa__slot_%v", len(replacementMap))
+		match = strings.Replace(match, "{{!", "{{", 1)
+		replacementMap[key] = match
+		return key
+	})
+
+	return tmpl, replacementMap
+}
+
+func unescapeHelmTemplateActions(tmpl string, replMap map[string]string) string {
+	re := regexp.MustCompile(`__helpa__slot_\d+`)
+	tmpl = re.ReplaceAllStringFunc(tmpl, func(match string) string {
+		return replMap[match]
+	})
+	return tmpl
+}
+
 func doPrepareComponentInput[TInput any](
 	templateName string,
 	templateStr string,
 	templateIsFile bool,
 	options *Options[TInput],
-) (string, error) {
+) (outTemplateStr string, replacementMap map[string]string, err error) {
+	outTemplateStr = templateStr
+
 	// Set defaults
 	if options.PreprocessTemplate == nil {
 		options.PreprocessTemplate = defaultPreprocessor
@@ -296,21 +329,25 @@ func doPrepareComponentInput[TInput any](
 
 	// Load the template from file
 	if templateIsFile {
-		dat, err := os.ReadFile(templateStr)
+		dat, err := os.ReadFile(outTemplateStr)
 		if err != nil {
 			err = fmt.Errorf("error reading file: %s in %q", err, templateName)
-			return templateStr, err
+			return outTemplateStr, replacementMap, err
 		}
-		templateStr = string(dat)
+		outTemplateStr = string(dat)
 	}
 
 	// Normalize the template
-	templateStr, err := options.PreprocessTemplate(templateStr)
+	outTemplateStr, err = options.PreprocessTemplate(outTemplateStr)
 	if err != nil {
-		return templateStr, err
+		return outTemplateStr, replacementMap, err
 	}
 
-	return templateStr, nil
+	// Add a way for users to access helm variables via go templates `{{ }}` without
+	// having those commands lost when we "pre-render" templates.
+	outTemplateStr, replacementMap = escapeHelmTemplateActions(outTemplateStr)
+
+	return outTemplateStr, replacementMap, nil
 }
 
 func CreateComponent[
@@ -324,7 +361,7 @@ func CreateComponent[
 		comp.Setup = func(t TInput) (context TContext, err error) { return context, err }
 	}
 
-	tmpl, err := doPrepareComponentInput(comp.Name, comp.Template, comp.TemplateIsFile, &comp.Options)
+	tmpl, replMap, err := doPrepareComponentInput(comp.Name, comp.Template, comp.TemplateIsFile, &comp.Options)
 	if err != nil {
 		if comp.Options.PanicOnError {
 			panic(err)
@@ -367,6 +404,9 @@ func CreateComponent[
 					return instance, content, err
 				}
 			}
+
+			// Put back the bits that we've removed previously so that they get rendered by Helm
+			content = unescapeHelmTemplateActions(content, replMap)
 
 			if comp.Render != nil {
 				instance, err = comp.Render(input, context, content)
@@ -414,7 +454,7 @@ func CreateComponentMulti[
 		comp.Setup = func(t TInput) (context TContext, err error) { return context, err }
 	}
 
-	tmpl, err := doPrepareComponentInput(comp.Name, comp.Template, comp.TemplateIsFile, &comp.Options)
+	tmpl, replMap, err := doPrepareComponentInput(comp.Name, comp.Template, comp.TemplateIsFile, &comp.Options)
 	if err != nil {
 		if comp.Options.PanicOnError {
 			panic(err)
@@ -457,6 +497,9 @@ func CreateComponentMulti[
 					return instances, contentParts, err
 				}
 			}
+
+			// Put back the bits that we've removed previously so that they get rendered by Helm
+			content = unescapeHelmTemplateActions(content, replMap)
 
 			// In Helm files, it's common to use `---` to define multiple independent
 			// resources. To support that, we try to split the rendered file into an array

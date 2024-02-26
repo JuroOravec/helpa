@@ -19,6 +19,7 @@ type Context struct {
 }
 
 func setupComponentInline[T any](
+	template string,
 	render func(Input, Context, string) (T, error),
 ) (Component[T, Input], error) {
 	return CreateComponent[T, Input, Context](
@@ -32,8 +33,8 @@ func setupComponentInline[T any](
 				}
 				return context, nil
 			},
-			Template: `Hello: {{ Catify .Helpa.Number }}`,
-			Render: render,
+			Template: template,
+			Render:   render,
 		},
 	)
 }
@@ -166,7 +167,7 @@ func TestCreateComponentFromFileFailsOnInvalidUnmarshal(t *testing.T) {
 
 func TestCreateComponentInline(t *testing.T) {
 	err := error(nil)
-	comp, err := setupComponentInline[any](nil)
+	comp, err := setupComponentInline[any](`Hello: {{ Catify .Helpa.Number }}`, nil)
 
 	if err != nil {
 		t.Error(err)
@@ -178,6 +179,24 @@ func TestCreateComponentInline(t *testing.T) {
 	}
 
 	if content != "Hello: 🐈 2 🐈" {
+		t.Errorf("Content differs from expeced, got %s", content)
+	}
+}
+
+func TestComponentInlineEscape(t *testing.T) {
+	err := error(nil)
+	comp, err := setupComponentInline[any](`Hello: {{ Catify .Helpa.Number }} {{! .Releases.Some.Path }}`, nil)
+
+	if err != nil {
+		t.Error(err)
+	}
+
+	_, content, err := comp.Render(Input{Number: 2})
+	if err != nil {
+		t.Error(err)
+	}
+
+	if content != "Hello: 🐈 2 🐈 {{ .Releases.Some.Path }}" {
 		t.Errorf("Content differs from expeced, got %s", content)
 	}
 }
