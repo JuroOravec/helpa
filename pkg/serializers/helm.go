@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -71,6 +72,10 @@ func writeK8sResourcesToFile(resourceGroups map[string][]runtime.Object, targetD
 		}
 
 		content := strings.Join(serialized, "\n---\n")
+
+		re := regexp.MustCompile(`\n?[ \t]*creationTimestamp: null[ \t]*\n?`)
+		content = re.ReplaceAllString(content, "\n")
+	
 		groups[key] = content
 	}
 
