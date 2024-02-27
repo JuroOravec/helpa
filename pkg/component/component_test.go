@@ -22,7 +22,7 @@ func setupComponentInline[T any](
 	template string,
 	render func(Input, Context, string) (T, error),
 ) (Component[T, Input], error) {
-	return CreateComponent[T, Input, Context](
+	return CreateComponent(
 		Def[T, Input, Context]{
 			Setup: func(input Input) (Context, error) {
 				context := Context{
@@ -42,7 +42,7 @@ func setupComponentInline[T any](
 func setupComponentFromFile[T any](
 	render func(Input, Context, string) (T, error),
 ) (Component[T, Input], error) {
-	return CreateComponent[T, Input, Context](
+	return CreateComponent(
 		Def[T, Input, Context]{
 			Template:       `../../examples/helm/helm.yaml`,
 			TemplateIsFile: true,
@@ -64,7 +64,7 @@ func setupComponentMultiFromFile[T any](
 	makeInstances func(Input, Context) ([]T, error),
 	render func(Input, Context, []string) ([]T, error),
 ) (ComponentMulti[T, Input], error) {
-	return CreateComponentMulti[T, Input, Context](
+	return CreateComponentMulti(
 		DefMulti[T, Input, Context]{
 			Template:       `../../examples/helm/helm.yaml`,
 			TemplateIsFile: true,
@@ -78,7 +78,7 @@ func setupComponentFromFileFrontload[T any](
 	setup func(input Input) (Context, error),
 	frontloadInput Input,
 ) (Component[T, Input], error) {
-	return CreateComponent[T, Input, Context](
+	return CreateComponent(
 		Def[T, Input, Context]{
 			Template:       `../../examples/helm/helm.yaml`,
 			TemplateIsFile: true,
@@ -95,7 +95,7 @@ func setupComponentMultiFromFileFrontload[T any](
 	makeInstances func(Input, Context) ([]T, error),
 	frontloadInput Input,
 ) (ComponentMulti[T, Input], error) {
-	return CreateComponentMulti[T, Input, Context](
+	return CreateComponentMulti(
 		DefMulti[T, Input, Context]{
 			Template:       `../../examples/helm/helm.yaml`,
 			TemplateIsFile: true,

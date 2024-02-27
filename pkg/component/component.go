@@ -16,6 +16,7 @@ import (
 	yaml "sigs.k8s.io/yaml"
 
 	preprocess "github.com/jurooravec/helpa/pkg/preprocess"
+	functions "github.com/jurooravec/helpa/pkg/functions"
 )
 
 // Component definition
@@ -118,6 +119,12 @@ func isFunc(v any) bool {
 	return reflect.TypeOf(v).Kind() == reflect.Func
 }
 
+func genCustomFuncMap() template.FuncMap {
+	return template.FuncMap{
+		"indentRest": functions.IndentRest,
+	}
+}
+
 func defaultPreprocessor(tmpl string) (string, error) {
 	tmpl, err := preprocess.TrimTemplate(tmpl)
 	if err != nil {
@@ -203,6 +210,12 @@ func doRender[TContext any](
 	// Using the Engine struct from Helm package ensures that we use all the same
 	// functions as they do (with a few exceptions).
 	engine := templateEngine.New()
+
+	// Set our own custom functions
+	customFuncs := genCustomFuncMap()
+	for key, val := range customFuncs {
+		engine.FuncMap[key] = val
+	}
 
 	// Set user-defined functions. These may override the defaults, but this should NOT
 	// happen, as the defaults are defined in lowercase. Since our custom fields
