@@ -27,7 +27,8 @@ func ApplyDefaults(s any, defaults any) error {
 	// If it's an interface or a pointer, unwrap it.
 	if val.Kind() == reflect.Ptr && val.Elem().Kind() == reflect.Struct {
 		val = val.Elem()
-	} else {
+	}
+	if val.Kind() != reflect.Struct {
 		return fmt.Errorf("s must be a struct")
 	}
 
