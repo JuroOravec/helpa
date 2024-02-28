@@ -17,8 +17,8 @@ type Spec struct {
 	Spec []string `json:"spec"`
 }
 
-// Tracking variables across templates can be hell.
-// Instead, each component defines its inputs.
+// Use input to cetralize all inputs and variables that the underlying template
+// should use.
 type Input struct {
 	Number int
 }
@@ -42,7 +42,7 @@ func init() {
 	err := error(nil)
 
 	// Each component must define 3 types: Spec, Input, Context
-	FileComponent, err = helpa.CreateComponent[Spec, Input, Context](
+	FileComponent, err = helpa.CreateComponent(
 		helpa.Def[Spec, Input, Context]{
 			Name: "FileComponent",
 			// The template uses Helm's renderer, which is based on `text/template`.
@@ -50,7 +50,7 @@ func init() {
 			Template:       `./fromfile/fromfile.yaml`,
 			TemplateIsFile: true,
 			// Configure behavour
-			Options: helpa.Options{
+			Options: helpa.Options[Input]{
 				// PanicOnError: false,
 				// Unmarshal: func() {...},
 			},

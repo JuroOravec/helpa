@@ -3,7 +3,9 @@ module helpa/examples
 go 1.22.0
 
 require (
-	github.com/jurooravec/helpa v0.5.2
+	github.com/google/uuid v1.3.0
+	github.com/jurooravec/helpa v0.6.4
+	github.com/samber/lo v1.39.0
 	k8s.io/api v0.29.2
 	k8s.io/apimachinery v0.29.2
 )
@@ -20,7 +22,6 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/huandu/xstrings v1.4.0 // indirect
 	github.com/imdario/mergo v0.3.13 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
@@ -32,6 +33,7 @@ require (
 	github.com/ompluscator/dynamic-struct v1.4.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	golang.org/x/crypto v0.17.0 // indirect
+	golang.org/x/exp v0.0.0-20220303212507-bbda1eaf7a17 // indirect
 	golang.org/x/net v0.19.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect

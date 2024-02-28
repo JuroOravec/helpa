@@ -18,7 +18,7 @@ type Spec struct {
 }
 
 // Use input to cetralize all inputs and variables that the underlying template
-// should use/
+// should use.
 type Input struct {
 	Number int
 }
@@ -36,15 +36,16 @@ type Context struct {
 // To make it easy to import this component already configured, we declare
 // the variable and then populated it in the `init` function.
 // See https://tutorialedge.net/golang/the-go-init-function/
-var BasicComponent helpa.Component[Spec, Input]
+var FromFuncComponent helpa.Component[Spec, Input]
+var FromFuncComponentMulti helpa.ComponentMulti[Spec, Input]
 
 func init() {
 	err := error(nil)
 
 	// Each component must define 3 types: Spec, Input, Context
-	BasicComponent, err = helpa.CreateComponent(
+	FromFuncComponent, err = helpa.CreateComponent(
 		helpa.Def[Spec, Input, Context]{
-			Name: "BasicComponent",
+			Name: "FromFuncComponent",
 			// Configure behavour
 			Options: helpa.Options[Input]{
 				// PanicOnError: false,
@@ -67,16 +68,58 @@ func init() {
 				}
 				return context, nil
 			},
-			// The template uses Helm's renderer, which is based on `text/template`.
-			// Hence, you will find most of Helm's functions like `toYaml`.
-			Template: `
-            my: cool
-            spec:
-              - Hello
-              - There
-              - {{ .Number | quote }}
-              - {{ Catify "I LOVE CATS" }}
-            `,
+			// Instead of defining a textual template, this component has a `Render`
+			// method that returns the expected data, bypassing the need for the template.
+			Render: func(input Input, context Context, content string) (Spec, error) {
+				spec := Spec{
+					My: "cool - but changed",
+					Spec: []string{
+						"Hello",
+						"There",
+						fmt.Sprint(context.Number),
+						context.Catify("I LOVE CATS"),
+					},
+				}
+				return spec, nil
+			},
+		})
+
+	// Same as above, but using the `CreateComponentMulti` variant
+	FromFuncComponentMulti, err = helpa.CreateComponentMulti(
+		helpa.DefMulti[Spec, Input, Context]{
+			Name: "FromFuncComponentMulti",
+			Setup: func(input Input) (Context, error) {
+				context := Context{
+					Number: input.Number,
+					Catify: func(s string) string {
+						return fmt.Sprintf("🐈 %s 🐈", s)
+					},
+				}
+				return context, nil
+			},
+			Render: func(input Input, context Context, contentParts []string) ([]Spec, error) {
+				specs := []Spec{
+					{
+						My: "cool - but changed",
+						Spec: []string{
+							"Hello",
+							"There",
+							fmt.Sprint(context.Number),
+							context.Catify("I LOVE CATS"),
+						},
+					},
+					{
+						My: "cool - but changed",
+						Spec: []string{
+							"Hello",
+							"There",
+							fmt.Sprint(context.Number),
+							context.Catify("I LOVE CATS"),
+						},
+					},
+				}
+				return specs, nil
+			},
 		})
 
 	if err != nil {

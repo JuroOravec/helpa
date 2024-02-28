@@ -1,34 +1,53 @@
 package helm
 
 import (
-	"fmt"
 	"log"
 
-	appsv1 "k8s.io/api/apps/v1"
-
 	helpa "github.com/jurooravec/helpa/pkg/component"
+	helpaUtils "github.com/jurooravec/helpa/pkg/utils"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
-// Tracking variables across templates can be hell.
-// Instead, each component defines its inputs.
+// Use input to cetralize all inputs and variables that the underlying template
+// should use.
 type Input struct {
-	Number int
+	Name      string
+	Container corev1.Container
+	Port      corev1.ContainerPort
 }
 
 // Each component defines a `Setup` function that describes how the `Input`
 // is transformed. The result of the `Setup` function is what becomes available
 // as variables and as functions in the template.
-//
-// In this example, we expose a variable `Number`, and a function `Catify`
 type Context struct {
-	Number int
-	Catify func(s string) string
+	Input
 }
 
 // To make it easy to import this component already configured, we declare
 // the variable and then populated it in the `init` function.
 // See https://tutorialedge.net/golang/the-go-init-function/
-var HelmComponent helpa.ComponentMulti[appsv1.Deployment, Input]
+//
+// NOTE: We use `runtime.Object` to indicate that, after this component renders the component,
+// it should return an array of runtime.Objects, which is an interface referring to k8s resources.
+var Component helpa.ComponentMulti[runtime.Object, Input]
+
+
+func ChartDefaults() Input {
+	return Input{
+		Name: "kuard",
+		Container: corev1.Container{
+			Name:            "kuard",
+			Image:           "gcr.io/kuar-demo/kuard-amd64:1",
+			ImagePullPolicy: "Always",
+		},
+		Port: corev1.ContainerPort{
+			ContainerPort: 8080,
+			Protocol:      "TCP",
+		},
+	}
+}
 
 func init() {
 	err := error(nil)
@@ -36,15 +55,15 @@ func init() {
 	// IMPORTANT: Notice that this component uses `CreateComponentMulti` and `DefMulti`.
 	// This is because the template in `helm.yaml` actually define multiple documents,
 	// separated by `---`.
-	HelmComponent, err = helpa.CreateComponentMulti[appsv1.Deployment, Input, Context](
-		helpa.DefMulti[appsv1.Deployment, Input, Context]{
-			Name: "HelmComponent",
+	Component, err = helpa.CreateComponentMulti(
+		helpa.DefMulti[runtime.Object, Input, Context]{
+			Name: "Kuard",
 			// The template uses Helm's renderer, which is based on `text/template`.
 			// Hence, you will find most of Helm's functions like `toYaml`.
 			Template:       `./helm/helm.yaml`,
 			TemplateIsFile: true,
 			// Configure behavour
-			Options: helpa.Options{
+			Options: helpa.Options[Input]{
 				// PanicOnError: false,
 				// Unmarshal: func() {...},
 			},
@@ -57,22 +76,26 @@ func init() {
 			// Other Context's fields are made available as variables, e.g.
 			// `{{ .MyVariable }}`
 			Setup: func(input Input) (Context, error) {
-				context := Context{
-					Number: input.Number,
-					Catify: func(s string) string {
-						return fmt.Sprintf("🐈 %s 🐈", s)
-					},
-				}
-				return context, nil
+				// Apply defaults to the given inputs
+				inputCopy := input
+				err = helpaUtils.ApplyDefaults(&inputCopy, ChartDefaults())
+				
+				return Context{Input: inputCopy}, err
 			},
-			// IMPORTANT: This is a field specific to ComponentMulti. Since each document
+			// IMPORTANT: `GetInstances` is specific to `ComponentMulti`. Since each document
 			// in the template can represent a different data structure, we have to specify
 			// the exact data type (via empty instances) for each item.
 			//
 			// Component reports error when the number of documents in the template and the
 			// number of provided instances does not match.
-			GetInstances: func(input Input) ([]appsv1.Deployment, error) {
-				return []appsv1.Deployment{{}, {}}, nil
+			GetInstances: func(input Input, context Context) ([]runtime.Object, error) {
+				// This says that our template defines one Deployment, and one Service,
+				// in this order.
+				instances := []runtime.Object{
+					&appsv1.Deployment{},
+					&corev1.Service{},
+				}
+				return instances, nil
 			},
 		})
 

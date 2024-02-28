@@ -1,0 +1,80 @@
+# Make vars so we can access these inside loops
+{{- $certbot_namespace := .Helpa.Input.CertbotNamespace }}
+
+# Configure job to run periodically
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: certbot-cronjob-{{ .Helpa.Id }}
+  namespace: {{ $certbot_namespace }}
+spec:
+  schedule: {{ .Helpa.Input.CertbotCronSchedule }}
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: certbot-account
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            {{ toYaml .Helpa.Input.CertbotImagePullSecrets | indentRest 12 }}
+          containers:
+            - name: certbot
+              {{ toYaml .Helpa.Input.CertbotContainer | indentRest 14 }}
+              command:
+                - /bin/sh
+                - -c
+                - {{ .Helpa.CertbotCmd }}
+---
+{{- if .Helpa.Input.RunImmediately }}
+# Configure one-off job to run immediately, since cron job will run only after
+# the specified period has passed at least once.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: certbot-init-job-{{ .Helpa.Id }}
+  namespace: {{ $certbot_namespace }}
+spec:
+  template:
+    spec:
+      serviceAccountName: certbot-account
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        {{ toYaml .Helpa.Input.CertbotImagePullSecrets | indentRest 8 }}
+      containers:
+        - name: certbot
+          {{ toYaml .Helpa.Input.CertbotContainer | indentRest 10 }}
+          command:
+            - /bin/sh
+            - -c
+            - {{ .Helpa.CertbotCmd }}
+---
+{{ end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: certbot-account
+  namespace: {{ $certbot_namespace }}
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: certbot-role
+rules:
+- resources: ["secrets"]
+  verbs: ["create", "delete"]
+{{ range .Helpa.Input.TlsSecretNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: certbot-role-binding-{{ . }}
+  namespace: {{ . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: certbot-role
+subjects:
+- kind: ServiceAccount
+  name: certbot-account
+  namespace: {{ $certbot_namespace }}
+{{ end }}

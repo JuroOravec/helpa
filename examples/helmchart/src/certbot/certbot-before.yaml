@@ -1,0 +1,86 @@
+{{- if .Values.certbot.enabled }}
+
+{{- $certbot_namespace := .Values.certbot.namespace }}
+{{- $certbot_secret_name := .Values.certbot.secret.name }}
+
+# Configure job to run periodically
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: certbot-cronjob-{{ randAlphaNum 6 | nospace | lower }}
+  namespace: {{ .Values.certbot.namespace }}
+spec:
+  schedule: {{ .Values.certbot.schedule }}
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: certbot-account
+          restartPolicy: OnFailure
+          imagePullSecrets:
+{{ toYaml .Values.certbot.imagePullSecrets | indent 12 }}
+          containers:
+            - name: certbot
+{{ toYaml .Values.certbot.container | indent 14 }}
+              command:
+                - /bin/sh
+                - -c
+                - certbot {{ .Values.certbot.commandArgs }} --email {{ .Values.certbot.contactEmail }} {{ range .Values.certbot.domains }} -d "{{ . }}" {{ end }} && cd /etc/letsencrypt/live/{{ .Values.domain }} {{ range .Values.certbot.secret.namespaces }} && kubectl delete secret {{ $certbot_secret_name }} -n {{ . }} || true && kubectl create secret tls {{ $certbot_secret_name }} -n {{ . }} --cert=fullchain.pem --key=privkey.pem {{ end }}
+---
+{{- if .Values.certbot.runImmediately }}
+# Configure one-off job to run immediately, since cron job will run only after
+# the specified period has passed at least once.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: certbot-init-job-{{ randAlphaNum 6 | nospace | lower }}
+  namespace: {{ .Values.certbot.namespace }}
+spec:
+  template:
+    spec:
+      serviceAccountName: certbot-account
+      restartPolicy: OnFailure
+      imagePullSecrets:
+{{ toYaml .Values.certbot.imagePullSecrets | indent 8 }}
+      containers:
+        - name: certbot
+{{ toYaml .Values.certbot.container | indent 10 }}
+          command:
+            - /bin/sh
+            - -c
+            - certbot {{ .Values.certbot.commandArgs }} --email {{ .Values.certbot.contactEmail }} {{ range .Values.certbot.domains }} -d "{{ . }}" {{ end }} && cd /etc/letsencrypt/live/{{ .Values.domain }} {{ range .Values.certbot.secret.namespaces }} && kubectl delete secret {{ $certbot_secret_name }} -n {{ . }} || true && kubectl create secret tls {{ $certbot_secret_name }} -n {{ . }} --cert=fullchain.pem --key=privkey.pem {{ end }}
+---
+{{ end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: certbot-account
+  namespace: {{ .Values.certbot.namespace }}
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: certbot-role
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["create", "delete"]
+---
+{{ range .Values.certbot.secret.namespaces }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: certbot-role-binding-{{ . }}
+  namespace: {{ . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: certbot-role
+subjects:
+- kind: ServiceAccount
+  name: certbot-account
+  namespace: {{ $certbot_namespace }}
+---
+{{ end }}
+
+{{ end }}
