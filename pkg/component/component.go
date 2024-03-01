@@ -10,13 +10,14 @@ import (
 	"strings"
 	template "text/template"
 
+	helmfile "github.com/helmfile/helmfile/pkg/tmpl"
 	reflections "github.com/oleiade/reflections"
 	dynamicstruct "github.com/ompluscator/dynamic-struct"
 	templateEngine "k8s.io/helm/pkg/engine"
 	yaml "sigs.k8s.io/yaml"
 
-	preprocess "github.com/jurooravec/helpa/pkg/preprocess"
 	functions "github.com/jurooravec/helpa/pkg/functions"
+	preprocess "github.com/jurooravec/helpa/pkg/preprocess"
 )
 
 // Component definition
@@ -82,12 +83,12 @@ type Options[TInput any] struct {
 	// indentation is normalized. See more in the `lib/component/preprocess` package.
 	//
 	// Use this option to define custom preprocessing, or disable the default one.
-	PreprocessTemplate func(tmpl string) (string, error)
+	PreprocessTemplate func(tmpl string, options Options[TInput]) (string, error)
 	// By default, templates are assumed to be YAML, and unmarshalled with yaml.Unmarshall.
 	//
 	// Use this option to if you want to modify the rendered template before unmarshalling it,
 	// or if you want to use different data types like JSON, TOML, etc.
-	Unmarshal func(rendered string, container any) error
+	Unmarshal func(rendered string, container any, options Options[TInput]) error
 	// If the document contains lines that contain this separator and nothing else,
 	// then the document will be split at these points, and evaluated as a list of
 	// smaller documents.
@@ -96,6 +97,11 @@ type Options[TInput any] struct {
 	//
 	// See https://yaml.org/spec/1.2.2/#22-structures
 	MultiDocSeparator string
+	// Optionally replace tabs with spaces.
+	//
+	// NOTE: This is required if you're using tabs and generating YAML files. Because
+	// YAML cannot process tabs.
+	TabSize *int
 	// Check integrity of textual templates at component creation.
 	//
 	// If frontloading is enabled, we will make a dummy call to the `component.Render`
@@ -125,16 +131,21 @@ func genCustomFuncMap() template.FuncMap {
 	}
 }
 
-func defaultPreprocessor(tmpl string) (string, error) {
+func defaultPreprocessor[TInput any](tmpl string, opts Options[TInput]) (string, error) {
 	tmpl, err := preprocess.TrimTemplate(tmpl)
 	if err != nil {
 		return tmpl, err
 	}
+
+	if opts.TabSize != nil {
+		tmpl = strings.ReplaceAll(tmpl, "\t", strings.Repeat(" ", *opts.TabSize))
+	}
+
 	tmpl = preprocess.Unindent(tmpl)
 	return tmpl, nil
 }
 
-func defaultUnmarshaller(rendered string, container any) error {
+func defaultUnmarshaller[TInput any](rendered string, container any, opts Options[TInput]) error {
 	jsondata, err := yaml.YAMLToJSON([]byte(rendered))
 	if err != nil {
 		return err
@@ -191,7 +202,7 @@ func parseContext(
 	return funcMap, dataStructInst, nil
 }
 
-func doRender[TContext any](
+func Render[TContext any](
 	templateName string,
 	templateStr string,
 	context TContext,
@@ -209,23 +220,29 @@ func doRender[TContext any](
 
 	// Using the Engine struct from Helm package ensures that we use all the same
 	// functions as they do (with a few exceptions).
+	// See https://helm.sh/docs/chart_template_guide/function_list/
 	engine := templateEngine.New()
+	for key, val := range engine.FuncMap {
+		funcMap[key] = val
+	}
+
+	// Similarly we use generate FuncMap for Helmfile's functions
+	// See https://helmfile.readthedocs.io/en/latest/templating_funcs/#env
+	// and https://github.com/helmfile/helmfile/blob/main/pkg/tmpl/context_funcs.go
+	helmfileCtx := helmfile.Context{}
+	helmfileFuncMap := helmfileCtx.CreateFuncMap()
+	for key, val := range helmfileFuncMap {
+		funcMap[key] = val
+	}
 
 	// Set our own custom functions
 	customFuncs := genCustomFuncMap()
 	for key, val := range customFuncs {
-		engine.FuncMap[key] = val
-	}
-
-	// Set user-defined functions. These may override the defaults, but this should NOT
-	// happen, as the defaults are defined in lowercase. Since our custom fields
-	// come from public fields, they SHOULD be all PascalCase.
-	for key, val := range funcMap {
-		engine.FuncMap[key] = val
+		funcMap[key] = val
 	}
 
 	tmpl := template.New(templateName)
-	tmpl.Funcs(engine.FuncMap)
+	tmpl.Funcs(funcMap)
 
 	// This section is based on Helm's code
 	if engine.Strict {
@@ -259,7 +276,7 @@ func doUnmarshalOne[TType any, TInput any](
 	content string,
 	options Options[TInput],
 ) (out TType, err error) {
-	err = options.Unmarshal(content, &out)
+	err = options.Unmarshal(content, &out, options)
 	if err != nil {
 		err = fmt.Errorf("render error in %q: %s", templateName, err)
 		return out, err
@@ -280,7 +297,7 @@ func doUnmarshalMulti[TType any, TInput any](
 		// NOTE: We MUST make a copy of the instance, because the `instances` serve as blueprint.
 		// So we must be careful here not to accidentally change state of the `instances` array.
 		instance := instances[index]
-		err = options.Unmarshal(doc, &instance)
+		err = options.Unmarshal(doc, &instance, options)
 		if err != nil {
 			err = fmt.Errorf("render error in %q: %s", templateName, err)
 			return out, err
@@ -298,7 +315,7 @@ func doUnmarshalMulti[TType any, TInput any](
 //
 // Behind the scences, we replace the `{{! }}` with identifiers that we can then
 // match back after the template has been matched.
-func escapeHelmTemplateActions(tmpl string) (string, map[string]string){
+func escapeHelmTemplateActions(tmpl string) (string, map[string]string) {
 	replacementMap := map[string]string{}
 
 	re := regexp.MustCompile(`{{![^}]*}}`)
@@ -351,7 +368,7 @@ func doPrepareComponentInput[TInput any](
 	}
 
 	// Normalize the template
-	outTemplateStr, err = options.PreprocessTemplate(outTemplateStr)
+	outTemplateStr, err = options.PreprocessTemplate(outTemplateStr, *options)
 	if err != nil {
 		return outTemplateStr, replacementMap, err
 	}
@@ -409,7 +426,7 @@ func CreateComponent[
 				}
 			}
 
-			content, err = doRender[TContext](comp.Name, comp.Template, context)
+			content, err = Render[TContext](comp.Name, comp.Template, context)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
@@ -502,7 +519,7 @@ func CreateComponentMulti[
 				}
 			}
 
-			content, err := doRender(comp.Name, comp.Template, context)
+			content, err := Render(comp.Name, comp.Template, context)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)

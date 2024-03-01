@@ -7,13 +7,16 @@ build:
 	go build
 
 test:
-	go test -v ./...
+	go test -v ./... -fullpath
+
+test_fast:
+	go test -v ./... -failfast -fullpath
 
 test_bench:
-	go test -v ./... -bench=.
+	go test -v ./... -bench=. -fullpath
 
 test_cov:
-	go test -v ./... -coverprofile=.coverage
+	go test -v ./... -coverprofile=.coverage -fullpath
 
 test_cov_show:
 	go tool cover -html=.coverage

@@ -83,3 +83,10 @@ func ApplyDefaults(s any, defaults any) error {
 
 	return nil
 }
+
+// Of is a helper routine that allocates a new any value
+// to store v and returns a pointer to it.
+// See https://github.com/xorcare/pointer
+func PointerOf[Value any](v Value) *Value {
+	return &v
+}
