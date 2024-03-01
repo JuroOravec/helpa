@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	sprig "github.com/Masterminds/sprig"
+	yaml "sigs.k8s.io/yaml"
 )
 
 var indentFn func(spaces int, v string) string
@@ -30,4 +31,14 @@ func IndentRest(spaces int, v string) string {
 		headAndRest[0],
 		indentFn(spaces, headAndRest[1]),
 	}, "\n")
+}
+
+func YamlToJson(v string) (string, error) {
+	jsondata, err := yaml.YAMLToJSON([]byte(v))
+	return string(jsondata), err
+}
+
+func JsonToYaml(v string) (string, error) {
+	jsondata, err := yaml.JSONToYAML([]byte(v))
+	return string(jsondata), err
 }

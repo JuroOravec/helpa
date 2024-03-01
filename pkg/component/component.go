@@ -133,6 +133,8 @@ func isFunc(v any) bool {
 func genCustomFuncMap() template.FuncMap {
 	return template.FuncMap{
 		"indentRest": functions.IndentRest,
+		"yamlToJson": functions.YamlToJson,
+		"jsonToYaml": functions.JsonToYaml,
 	}
 }
 
