@@ -10,6 +10,7 @@ import (
 	"strings"
 	template "text/template"
 
+	eris "github.com/rotisserie/eris"
 	helmfile "github.com/helmfile/helmfile/pkg/tmpl"
 	reflections "github.com/oleiade/reflections"
 	dynamicstruct "github.com/ompluscator/dynamic-struct"
@@ -18,6 +19,10 @@ import (
 
 	functions "github.com/jurooravec/helpa/pkg/functions"
 	preprocess "github.com/jurooravec/helpa/pkg/preprocess"
+)
+
+var (
+	ErrComponentRenderResultMismatch = eris.New("number of instances extracted from the rendered template does not match the number of declared instances in `GetInstances`")
 )
 
 // Component definition
@@ -134,7 +139,7 @@ func genCustomFuncMap() template.FuncMap {
 func defaultPreprocessor[TInput any](tmpl string, opts Options[TInput]) (string, error) {
 	tmpl, err := preprocess.TrimTemplate(tmpl)
 	if err != nil {
-		return tmpl, err
+		return tmpl, eris.Wrap(err, "failed to trim whitespace from template")
 	}
 
 	if opts.TabSize != nil {
@@ -148,7 +153,7 @@ func defaultPreprocessor[TInput any](tmpl string, opts Options[TInput]) (string,
 func defaultUnmarshaller[TInput any](rendered string, container any, opts Options[TInput]) error {
 	jsondata, err := yaml.YAMLToJSON([]byte(rendered))
 	if err != nil {
-		return err
+		return eris.Wrap(err, "failed to convert rendered template from YAML to JSON")
 	}
 	dec := json.NewDecoder(bytes.NewReader(jsondata))
 	dec.DisallowUnknownFields()
@@ -171,7 +176,7 @@ func parseContext(
 	structBuilder := dynamicstruct.NewStruct()
 	structItems, err := reflections.Items(context)
 	if err != nil {
-		return funcMap, nil, fmt.Errorf("failed to process context in %q: %s", compName, err)
+		return funcMap, nil, eris.Wrapf(err, "failed to process context in %q", compName)
 	}
 
 	varMap := map[string]any{}
@@ -195,7 +200,7 @@ func parseContext(
 	for key, val := range varMap {
 		err = reflections.SetField(dataStructInst, key, val)
 		if err != nil {
-			return funcMap, dataStructInst, fmt.Errorf("failed to create data struct in %q: %s", compName, err)
+			return funcMap, dataStructInst, eris.Wrapf(err, "failed to create data struct in %q", compName)
 		}
 	}
 
@@ -209,7 +214,7 @@ func Render[TContext any](
 ) (content string, err error) {
 	funcMap, dataStructInst, err := parseContext(templateName, context)
 	if err != nil {
-		return content, err
+		return content, eris.Wrapf(err, "failed to process context in component %q", templateName)
 	}
 
 	// "Namespace" all the variables from user's component under the "Helpa" key
@@ -255,14 +260,14 @@ func Render[TContext any](
 
 	_, err = tmpl.Parse(templateStr)
 	if err != nil {
-		return content, fmt.Errorf("parse error in %q: %s", templateName, err)
+		return content, eris.Wrapf(err, "parse error in %q", templateName)
 	}
 
 	// Do the actual rendering
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, data)
 	if err != nil {
-		err = fmt.Errorf("render error in %q: %s", templateName, err)
+		err = eris.Wrapf(err, "render error in %q", templateName)
 		return content, err
 	}
 
@@ -278,7 +283,7 @@ func doUnmarshalOne[TType any, TInput any](
 ) (out TType, err error) {
 	err = options.Unmarshal(content, &out, options)
 	if err != nil {
-		err = fmt.Errorf("render error in %q: %s", templateName, err)
+		err = eris.Wrapf(err, "render error in %q", templateName)
 		return out, err
 	}
 
@@ -299,7 +304,7 @@ func doUnmarshalMulti[TType any, TInput any](
 		instance := instances[index]
 		err = options.Unmarshal(doc, &instance, options)
 		if err != nil {
-			err = fmt.Errorf("render error in %q: %s", templateName, err)
+			err = eris.Wrapf(err, "render error in %q", templateName)
 			return out, err
 		}
 		out = append(out, instance)
@@ -361,7 +366,7 @@ func doPrepareComponentInput[TInput any](
 	if templateIsFile {
 		dat, err := os.ReadFile(outTemplateStr)
 		if err != nil {
-			err = fmt.Errorf("error reading file: %s in %q", err, templateName)
+			err = eris.Wrapf(err, "error reading file in %q", templateName)
 			return outTemplateStr, replacementMap, err
 		}
 		outTemplateStr = string(dat)
@@ -370,7 +375,7 @@ func doPrepareComponentInput[TInput any](
 	// Normalize the template
 	outTemplateStr, err = options.PreprocessTemplate(outTemplateStr, *options)
 	if err != nil {
-		return outTemplateStr, replacementMap, err
+		return outTemplateStr, replacementMap, eris.Wrapf(err, "failed to preprocess template in %q", templateName)
 	}
 
 	// Add a way for users to access helm variables via go templates `{{ }}` without
@@ -555,7 +560,7 @@ func CreateComponentMulti[
 			}
 
 			if len(instances) != len(contentParts) {
-				err = fmt.Errorf("found %v documents in the template, but there is %v instances to unmarshal the data to. These must match. Review the component's `GetInstances` method and the template", len(contentParts), len(instances))
+				err = eris.Wrapf(ErrComponentRenderResultMismatch, "found %v documents in the template, but there is %v instances to unmarshal the data to. These must match. Review the component's `GetInstances` method and the template", len(contentParts), len(instances))
 				return instances, contentParts, err
 			}
 

@@ -7,6 +7,7 @@ require (
 	github.com/helmfile/helmfile v0.162.0
 	github.com/oleiade/reflections v1.0.1
 	github.com/ompluscator/dynamic-struct v1.4.0
+	github.com/rotisserie/eris v0.5.4
 	github.com/stretchr/testify v1.8.4
 	k8s.io/api v0.29.2
 	k8s.io/apimachinery v0.29.2

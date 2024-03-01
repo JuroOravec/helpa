@@ -8,9 +8,14 @@ import (
 	"strings"
 	"time"
 
+	eris "github.com/rotisserie/eris"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/yaml"
+)
+
+var (
+	ErrInvalidGroupByKey = eris.New("InvalidGroupByKey")
 )
 
 func K8sGroupResourcesByFunc[T runtime.Object](resources []T, groupBy func(T) (string, error)) (map[string][]T, error) {
@@ -19,7 +24,7 @@ func K8sGroupResourcesByFunc[T runtime.Object](resources []T, groupBy func(T) (s
 	for index, resource := range resources {
 		key, err := groupBy(resource)
 		if err != nil {
-			return groups, fmt.Errorf("groupBy getter error at index %v: %v", index, err)
+			return groups, eris.Wrapf(err, "groupBy getter error at index %v", index)
 		}
 		groups[key] = append(groups[key], resource)
 	}
@@ -38,7 +43,7 @@ func K8sGroupResourcesBy[T runtime.Object](resources []T, groupBy string) (map[s
 		case "namespace":
 			accessor, err := meta.Accessor(resource)
 			if err != nil {
-				return groups, err
+				return groups, eris.Wrap(err, "failed getting namespace accessor")
 			}
 			key = accessor.GetNamespace()
 			if key == "" {
@@ -48,7 +53,7 @@ func K8sGroupResourcesBy[T runtime.Object](resources []T, groupBy string) (map[s
 			gvk := resource.GetObjectKind().GroupVersionKind()
 			key = strings.ToLower(gvk.Kind)
 		default:
-			return groups, fmt.Errorf("unsupported groupBy parameter: %s", groupBy)
+			return groups, eris.Wrapf(ErrInvalidGroupByKey, "unsupported groupBy parameter: %s", groupBy)
 		}
 
 		groups[key] = append(groups[key], resource)
@@ -63,10 +68,10 @@ func writeK8sResourcesToFile(resourceGroups map[string][]runtime.Object, targetD
 	// Serialize
 	for key, resources := range resourceGroups {
 		serialized := []string{}
-		for _, resource := range resources {
+		for index, resource := range resources {
 			yamlBytes, err := yaml.Marshal(resource)
 			if err != nil {
-				return err
+				return eris.Wrapf(err, "failed to marshal resource for file %s at index %v", key, index)
 			}
 			serialized = append(serialized, string(yamlBytes))
 		}
@@ -75,7 +80,7 @@ func writeK8sResourcesToFile(resourceGroups map[string][]runtime.Object, targetD
 
 		re := regexp.MustCompile(`\n?[ \t]*creationTimestamp: null[ \t]*\n?`)
 		content = re.ReplaceAllString(content, "\n")
-	
+
 		groups[key] = content
 	}
 
@@ -88,7 +93,7 @@ func writeK8sResourcesToFile(resourceGroups map[string][]runtime.Object, targetD
 
 		filename := filepath.Join(targetDir, fmt.Sprintf("%s.yaml", groupName))
 		if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
-			return err
+			return eris.Wrapf(err, "failed to write resources to file %s", groupName)
 		}
 	}
 
@@ -103,11 +108,11 @@ func writeK8sResourcesToFile(resourceGroups map[string][]runtime.Object, targetD
 func HelmChartSerializer(resources map[string][]runtime.Object, targetDir string) error {
 	// See https://stackoverflow.com/a/31151508/9788634
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return err
+		return eris.Wrapf(err, "failed to create directory at %q", targetDir)
 	}
 
 	if err := writeK8sResourcesToFile(resources, targetDir); err != nil {
-		return err
+		return eris.Wrapf(err, "failed to write k8s resources to directory %q", targetDir)
 	}
 
 	return nil

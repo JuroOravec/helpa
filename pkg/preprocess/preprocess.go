@@ -3,6 +3,8 @@ package preprocess
 import (
 	"regexp"
 	"strings"
+
+	eris "github.com/rotisserie/eris"
 )
 
 // Remove leading/trailing empty lines
@@ -10,7 +12,7 @@ func TrimTemplate(tmpl string) (string, error) {
 	for _, pattern := range []string{`^(?:\s*\n)+`, `(?:\n\s*)+$`} {
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			return "", err
+			return "", eris.Wrap(err, "failed to compile regexp")
 		}
 		tmpl = re.ReplaceAllLiteralString(tmpl, "")
 	}

@@ -1,10 +1,14 @@
 package utils
 
 import (
-	"fmt"
 	"reflect"
 
+	eris "github.com/rotisserie/eris"
 	reflections "github.com/oleiade/reflections"
+)
+
+var (
+	ErrNotStruct = eris.New("value passed to ApplyDefaults is not a struct")
 )
 
 // See https://stackoverflow.com/a/49471736/9788634
@@ -15,11 +19,11 @@ func ApplyDefaults(s any, defaults any) error {
 
 	defFieldValues, err := reflections.Items(defaults)
 	if err != nil {
-		return err
+		return eris.Wrap(err, "failed to extract fields from defaults struct")
 	}
 	fieldNames, err := reflections.Fields(s)
 	if err != nil {
-		return err
+		return eris.Wrap(err, "failed to extract fields from target struct")
 	}
 
 	val := reflect.ValueOf(s)
@@ -29,7 +33,7 @@ func ApplyDefaults(s any, defaults any) error {
 		val = val.Elem()
 	}
 	if val.Kind() != reflect.Struct {
-		return fmt.Errorf("s must be a struct")
+		return ErrNotStruct
 	}
 
 	valNumFields := val.NumField()
