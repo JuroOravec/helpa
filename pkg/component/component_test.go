@@ -27,6 +27,7 @@ type FromFileSpec struct {
 func setupComponentInline[T any](
 	template string,
 	render func(Input, Context, string) (T, error),
+	defaults func() Input,
 ) (Component[T, Input], error) {
 	return CreateComponent(
 		Def[T, Input, Context]{
@@ -39,8 +40,34 @@ func setupComponentInline[T any](
 				}
 				return context, nil
 			},
+			Defaults: defaults,
 			Template: template,
 			Render:   render,
+		},
+	)
+}
+
+func setupComponentMultiInline[T any](
+	template string,
+	makeInstances func(Input, Context) ([]T, error),
+	render func(Input, Context, []string) ([]T, error),
+	defaults func() Input,
+) (ComponentMulti[T, Input], error) {
+	return CreateComponentMulti(
+		DefMulti[T, Input, Context]{
+			Setup: func(input Input) (Context, error) {
+				context := Context{
+					Number: fmt.Sprint(input.Number),
+					Catify: func(s string) string {
+						return fmt.Sprintf("🐈 %s 🐈", s)
+					},
+				}
+				return context, nil
+			},
+			GetInstances: makeInstances,
+			Defaults:     defaults,
+			Template:     template,
+			Render:       render,
 		},
 	)
 }
@@ -185,7 +212,11 @@ func TestCreateComponentFromFileFailsOnInvalidUnmarshal(t *testing.T) {
 
 func TestCreateComponentInline(t *testing.T) {
 	assert := assert.New(t)
-	comp, err := setupComponentInline[any](`Hello: {{ Catify .Helpa.Number }}`, nil)
+	comp, err := setupComponentInline[any](
+		`Hello: {{ Catify .Helpa.Number }}`,
+		nil,
+		func() Input { return Input{} },
+	)
 	assert.Nil(err)
 
 	_, content, err := comp.Render(Input{Number: 2})
@@ -195,7 +226,11 @@ func TestCreateComponentInline(t *testing.T) {
 
 func TestComponentInlineEscape(t *testing.T) {
 	assert := assert.New(t)
-	comp, err := setupComponentInline[any](`Hello: {{ Catify .Helpa.Number }} {{! .Releases.Some.Path }}`, nil)
+	comp, err := setupComponentInline[any](
+		`Hello: {{ Catify .Helpa.Number }} {{! .Releases.Some.Path }}`,
+		nil,
+		func() Input { return Input{} },
+	)
 	assert.Nil(err)
 
 	_, content, err := comp.Render(Input{Number: 2})
@@ -344,6 +379,40 @@ func TestComponentMultiRender(t *testing.T) {
 	// the the "new" spec.
 	assert.Len(instances, 1)
 	assert.Equal([]string{"My super container", "gcr.io/wow-so-great:1"}, instances[0].Spec)
+}
+
+func TestComponentDefaults(t *testing.T) {
+	assert := assert.New(t)
+
+	comp, err := setupComponentInline[any](
+		`Hello: {{ Catify .Helpa.Number }}`,
+		nil,
+		func() Input { return Input{Number: 13} },
+	)
+	assert.Nil(err)
+
+	_, content, err := comp.Render(Input{})
+	assert.Nil(err)
+	assert.Equal("Hello: 🐈 13 🐈", content)
+}
+
+func TestComponentMultiDefaults(t *testing.T) {
+	assert := assert.New(t)
+
+	comp, err := setupComponentMultiInline(
+		"Hello: {{ Catify .Helpa.Number }}\n---\nHello: {{ Catify .Helpa.Number }}",
+		func(Input, Context) ([]any, error) {
+			return []any{nil, nil}, nil
+		},
+		nil,
+		func() Input { return Input{Number: 13} },
+	)
+	assert.Nil(err)
+
+	_, contents, err := comp.Render(Input{})
+	assert.Nil(err)
+	assert.Equal("Hello: 🐈 13 🐈\n", contents[0])
+	assert.Equal("\nHello: 🐈 13 🐈", contents[1])
 }
 
 func BenchmarkCreateComponentFromMulti(b *testing.B) {

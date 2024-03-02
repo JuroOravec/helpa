@@ -10,15 +10,16 @@ import (
 	"strings"
 	template "text/template"
 
-	eris "github.com/rotisserie/eris"
 	helmfile "github.com/helmfile/helmfile/pkg/tmpl"
 	reflections "github.com/oleiade/reflections"
 	dynamicstruct "github.com/ompluscator/dynamic-struct"
+	eris "github.com/rotisserie/eris"
 	templateEngine "k8s.io/helm/pkg/engine"
 	yaml "sigs.k8s.io/yaml"
 
 	functions "github.com/jurooravec/helpa/pkg/functions"
 	preprocess "github.com/jurooravec/helpa/pkg/preprocess"
+	"github.com/jurooravec/helpa/pkg/utils"
 )
 
 var (
@@ -33,6 +34,7 @@ type Def[TType any, TInput any, TContext any] struct {
 	//
 	// If false, `Template` is assumed to be the template itself.
 	TemplateIsFile bool
+	Defaults       func() TInput
 	// Function that transforms input to context. Functions defined on the context
 	// will be made available as template functions. Other context fields will b
 	// available as template variables.
@@ -57,6 +59,7 @@ type DefMulti[TType any, TInput any, TContext any] struct {
 	//
 	// If false, `Template` is assumed to be the template itself.
 	TemplateIsFile bool
+	Defaults       func() TInput
 	// Function that transforms input to context. Functions defined on the context
 	// will be made available as template functions. Other context fields will b
 	// available as template variables.
@@ -416,15 +419,13 @@ func CreateComponent[
 	// `func(input TInput) (instance TType, content string, err error)`
 	component := Component[TType, TInput]{
 		Render: func(input TInput) (instance TType, content string, err error) {
-			defer func() {
-				if !comp.Options.PanicOnError {
-					if r := recover(); r != nil {
-						err = fmt.Errorf("failed rendering component %q: %v", comp.Name, r)
-					}
-				}
-			}()
+			finalInput := input
+			if comp.Defaults != nil {
+				defaults := comp.Defaults()
+				utils.ApplyDefaults(&finalInput, defaults)
+			}
 
-			context, err := comp.Setup(input)
+			context, err := comp.Setup(finalInput)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
@@ -433,7 +434,7 @@ func CreateComponent[
 				}
 			}
 
-			content, err = Render[TContext](comp.Name, comp.Template, context)
+			content, err = Render(comp.Name, comp.Template, context)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
@@ -446,7 +447,7 @@ func CreateComponent[
 			content = unescapeHelmTemplateActions(content, replMap)
 
 			if comp.Render != nil {
-				instance, err = comp.Render(input, context, content)
+				instance, err = comp.Render(finalInput, context, content)
 			} else {
 				// Unmarshal the generated structured data to ensure that they are valid.
 				instance, err = doUnmarshalOne[TType](comp.Name, content, comp.Options)
@@ -509,15 +510,13 @@ func CreateComponentMulti[
 	// `func(input TInput) (instance TType, []contentParts string, err error)`
 	component := ComponentMulti[TType, TInput]{
 		Render: func(input TInput) (instances []TType, contentParts []string, err error) {
-			defer func() {
-				if !comp.Options.PanicOnError {
-					if r := recover(); r != nil {
-						err = fmt.Errorf("failed rendering component %q: %v", comp.Name, r)
-					}
-				}
-			}()
+			finalInput := input
+			if comp.Defaults != nil {
+				defaults := comp.Defaults()
+				utils.ApplyDefaults(&finalInput, defaults)
+			}
 
-			context, err := comp.Setup(input)
+			context, err := comp.Setup(finalInput)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
@@ -552,7 +551,7 @@ func CreateComponentMulti[
 			// the interface).
 			//
 			// But if author didn't specify this array,
-			instances, err = comp.GetInstances(input, context)
+			instances, err = comp.GetInstances(finalInput, context)
 			if err != nil {
 				if comp.Options.PanicOnError {
 					panic(err)
@@ -567,7 +566,7 @@ func CreateComponentMulti[
 			}
 
 			if comp.Render != nil {
-				instances, err = comp.Render(input, context, contentParts)
+				instances, err = comp.Render(finalInput, context, contentParts)
 			} else {
 				// Unmarshal the generated structured data to ensure that they are valid.
 				instances, err = doUnmarshalMulti(comp.Name, contentParts, comp.Options, instances)

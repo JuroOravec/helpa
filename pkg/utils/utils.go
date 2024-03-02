@@ -3,8 +3,8 @@ package utils
 import (
 	"reflect"
 
-	eris "github.com/rotisserie/eris"
 	reflections "github.com/oleiade/reflections"
+	eris "github.com/rotisserie/eris"
 )
 
 var (
